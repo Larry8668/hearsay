@@ -18,6 +18,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var toggleRecordingBar: () -> Void
         var toggleBarHover: () -> Void
         var setFontSize: (Double) -> Void
+        var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
         var showWelcome: () -> Void
         var openLogs: () -> Void
         var openSettings: (Speaker) -> Void
@@ -47,6 +48,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var sources: [Speaker: Bool] = [:]
         var launchAtLogin = false
         var fontSize: Double = 13
+        var echoCancellation = "auto"
         var engine = ""
     }
 
@@ -73,6 +75,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let loginItem = NSMenuItem()
     private let updateChecksItem = NSMenuItem()
     private let fontItem = NSMenuItem()
+    private let echoItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
     var onMenuWillOpen: (() -> Void)?
@@ -163,6 +166,19 @@ final class MenuBar: NSObject, NSMenuDelegate {
         barHoverItem.title = "Expand recording bar on hover"
         bind(barHoverItem, #selector(toggleBarHover))
         settings.addItem(barHoverItem)
+        echoItem.title = "Echo cancellation"
+        let echo = NSMenu()
+        for choice in EchoCancellation.allCases {
+            let mi = item(choice.title, #selector(chooseEcho(_:)))
+            mi.representedObject = choice.rawValue
+            echo.addItem(mi)
+        }
+        echo.addItem(.separator())
+        let note = NSMenuItem(title: "Stops the speakers leaking into \"me\"; costs ~25% CPU", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        echo.addItem(note)
+        echoItem.submenu = echo
+        settings.addItem(echoItem)
         fontItem.title = "Live panel font size"
         let fonts = NSMenu()
         for (size, name) in AppModel.fontChoices {
@@ -255,6 +271,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         themItem.state = s.sources[.them] == true ? .on : .off
         loginItem.state = s.launchAtLogin ? .on : .off
         for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) / 10 == s.fontSize ? .on : .off }
+        for mi in echoItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == s.echoCancellation ? .on : .off }
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
     }
 
@@ -299,6 +316,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag) / 10) }
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
+    @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
     @objc private func relaunch() { actions.relaunch() }

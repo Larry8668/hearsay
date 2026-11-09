@@ -26,6 +26,17 @@ again.
 Everywhere hearsay shows the two sides, **me is blue** and **them is orange**: the chips in the live
 transcript, the lines on the recording bar, and the two halves of its waveform.
 
+## Speakers or headphones: echo cancellation
+
+With the sound coming out of your Mac's speakers, your microphone hears the other side too, and
+"me" would repeat what "them" just said. hearsay runs Apple's voice processing on the microphone
+to cancel that (the same processing FaceTime uses; the Control Center mic modes such as Voice
+Isolation apply to hearsay as well). It costs about a quarter of one CPU core, so by default it is
+only on while your output is a loudspeaker: built-in speakers, a monitor, AirPlay. With headphones,
+AirPods or a USB headset there is nothing to cancel and it stays off. Change this under
+Settings ▸ Echo cancellation (*Auto*, *Always*, *Off*). A text-level filter also drops a "me" line
+that is just a copy of what "them" said at the same moment.
+
 ## The recording bar
 
 While a session is listening or paused, a small dark capsule sits at the bottom centre of the
@@ -90,7 +101,7 @@ later. A session in which nobody spoke leaves no file.
 | Copy transcript | The current or last session as plain text |
 | Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, show the recording bar, expand it on hover, live panel font size, which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, show the recording bar, expand it on hover, echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now* |
 

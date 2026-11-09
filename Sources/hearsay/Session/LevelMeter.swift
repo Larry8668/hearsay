@@ -3,8 +3,8 @@ import Foundation
 /// Thread-safe "latest level per lane", written by the lanes' feed tasks at audio rate.
 ///
 /// The feed task runs off the main actor and sees every chunk (10–20 per second per lane), so it
-/// only stores a number here; `AudioLevels` reads it from a 30 Hz main-thread timer. That decouples
-/// publishing from chunk rate (at most 30 UI updates/s however chunks arrive) and gives a clock to
+/// only stores a number here; `AudioLevels` reads it from a 20 Hz main-thread timer. That decouples
+/// publishing from chunk rate (at most 20 UI updates/s however chunks arrive) and gives a clock to
 /// decay an idle lane: the system tap delivers NOTHING while no app plays, so without one the last
 /// value would freeze on screen.
 final class LevelMeter: @unchecked Sendable {
@@ -43,7 +43,7 @@ final class LevelMeter: @unchecked Sendable {
 }
 
 /// Smoothed levels + a short history for the recording bar's waveform. Lives on AppModel but as
-/// its own ObservableObject, so the 30 Hz updates re-render only the waveform, not every view that
+/// its own ObservableObject, so the 20 Hz updates re-render only the waveform, not every view that
 /// observes AppModel (the live panel with hundreds of lines).
 ///
 /// Main thread only.
@@ -51,7 +51,7 @@ final class AudioLevels: ObservableObject {
     struct Frame: Equatable { var me: Float = 0; var them: Float = 0 }
 
     static let barCount = 36
-    /// Smoothed level per lane, 0…1, updated ≤30×/s.
+    /// Smoothed level per lane, 0…1, updated ≤20×/s.
     @Published private(set) var levels: [Speaker: Float] = [:]
     /// Oldest first; the last frame is the live one (it follows the level every tick and is
     /// committed every second tick, so 36 bars cover ≈2.4 s).
@@ -65,7 +65,7 @@ final class AudioLevels: ObservableObject {
     /// Starts ticking (listening). Idempotent.
     func run() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
+        let t = Timer(timeInterval: 1.0 / 20, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)   // keep moving while a menu is open
         timer = t
     }

@@ -29,6 +29,8 @@ final class SessionController {
     private var pauseTask: Task<Void, Never>?
     /// Start was requested before the model was ready; begin as soon as it is.
     private var startWhenReady = false
+    /// Drops mic lines that are just the speakers heard by the mic (see EchoFilter).
+    private var echo = EchoFilter()
     /// Every engine finished `prepare` (the model state can read .ready while the second is still loading).
     private var enginesReady = false
     private var warningToken = 0
@@ -320,9 +322,18 @@ final class SessionController {
         case .partial(let text, let speaker):
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
             model.partials[speaker] = t.isEmpty ? nil : t
+            // Partials carry no timestamps; a them-hypothesis is at most ~25 s old.
+            if speaker == .them, !t.isEmpty { echo.observeThem(text: t, start: Date().addingTimeInterval(-25), end: Date()) }
         case .final(let line):
             guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 model.partials[line.speaker] = nil; return
+            }
+            if line.speaker == .them {
+                echo.observeThem(text: line.text, start: line.start, end: line.end)
+            } else if echo.isEcho(text: line.text, start: line.start, end: line.end) {
+                Log.info("echo filter: dropped me-line that matches them: \"\(line.text.prefix(60))\"")
+                model.partials[.me] = nil
+                return
             }
             store?.insert(line)
             model.insert(line)

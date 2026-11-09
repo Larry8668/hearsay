@@ -22,6 +22,8 @@ final class MicCapture: AudioSource {
     private var configObserver: NSObjectProtocol?
     private var pendingChange: DispatchWorkItem?
     private var generation = 0   // bumps on every tap install so buffers from a dead tap are dropped
+    private var vpioActive = false
+    private var outputListener: AudioObjectPropertyListenerBlock?
 
     init() { displayName = CA.name(CA.defaultInputDevice) ?? "Microphone" }
 
@@ -54,6 +56,11 @@ final class MicCapture: AudioSource {
         queue.sync {
             guard continuation != nil || engine != nil else { return }
             tearDownEngine()
+            if let l = outputListener {
+                var addr = CA.address(kAudioHardwarePropertyDefaultOutputDevice)
+                AudioObjectRemovePropertyListenerBlock(CA.system, &addr, queue, l)
+                outputListener = nil
+            }
             if let tail = resampler?.flush(), !tail.isEmpty {
                 for c in assembler.append(tail, startTime: nil) { continuation?.yield(c) }
             }
@@ -74,8 +81,13 @@ final class MicCapture: AudioSource {
         let input = engine.inputNode
         // Must happen BEFORE reading the format / installing the tap: enabling voice processing
         // swaps the underlying AU (VoiceProcessingIO) and changes the input format.
+        // Voice processing (echo cancellation + noise suppression) costs ~25% of a core on an M4,
+        // so it runs only when it can do anything: when the output is a loudspeaker the mic hears.
+        let useVPIO = EchoCancellation.shouldEnable()
+        vpioActive = useVPIO
         do {
-            try input.setVoiceProcessingEnabled(true)
+            if useVPIO { try input.setVoiceProcessingEnabled(true) }
+            else { Log.info("mic: voice processing off (\(EchoCancellation.current.rawValue); output \(CA.name(CA.defaultOutputDevice) ?? "?"))") }
             // VPIO ducks *all other audio* by default (Zoom's own playback would drop ~15 dB
             // while we record). Ask for the least ducking we can get.
             input.voiceProcessingOtherAudioDuckingConfiguration =
@@ -108,6 +120,26 @@ final class MicCapture: AudioSource {
             self.queue.async { self.scheduleConfigurationChange() }
         }
         Log.info("mic: started on \"\(displayName)\" \(Int(format.sampleRate)) Hz × \(format.channelCount) ch, voice processing \(input.isVoiceProcessingEnabled ? "on" : "off")")
+        watchOutputDevice()
+    }
+
+    /// Plugging headphones in (or out) changes whether echo cancellation is worth running; the
+    /// decision is baked into the engine, so rebuild it when the answer changes.
+    private func watchOutputDevice() {
+        guard outputListener == nil else { return }
+        var addr = CA.address(kAudioHardwarePropertyDefaultOutputDevice)
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            guard let self else { return }
+            self.queue.asyncAfter(deadline: .now() + 0.5) {   // let the new device settle
+                guard self.continuation != nil, self.engine != nil else { return }
+                let want = EchoCancellation.shouldEnable()
+                guard want != self.vpioActive else { return }
+                Log.info("mic: output changed; echo cancellation \(want ? "on" : "off"), rebuilding engine")
+                self.tearDownEngine()
+                do { try self.buildEngine() } catch { self.scheduleRetry() }
+            }
+        }
+        if AudioObjectAddPropertyListenerBlock(CA.system, &addr, queue, block) == noErr { outputListener = block }
     }
 
     /// `format: nil` = whatever the node produces right now. A fixed format raises an ObjC
@@ -194,5 +226,33 @@ final class MicCapture: AudioSource {
         let samples = resampler.convert(buffer)
         let start = hostTime.map(CA.date(fromHostTime:))
         for chunk in assembler.append(samples, startTime: start) { continuation.yield(chunk) }
+    }
+}
+
+/// Setting: when to run Apple's voice processing on the microphone.
+enum EchoCancellation: String, CaseIterable {
+    /// Only while the default output is a loudspeaker (built-in speakers, monitor, AirPlay).
+    case auto
+    case always
+    case off
+
+    static let key = "echoCancellation"
+    static var current: EchoCancellation {
+        get { UserDefaults.standard.string(forKey: key).flatMap(EchoCancellation.init) ?? .auto }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+    }
+    var title: String {
+        switch self {
+        case .auto: return "Auto (only with speakers)"
+        case .always: return "Always"
+        case .off: return "Off"
+        }
+    }
+    static func shouldEnable() -> Bool {
+        switch current {
+        case .always: return true
+        case .off: return false
+        case .auto: return CA.outputIsLoudspeaker()
+        }
     }
 }

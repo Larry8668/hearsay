@@ -58,6 +58,30 @@ enum CA {
     }
 
     static func uid(_ device: AudioDeviceID) -> String? { string(device, kAudioDevicePropertyDeviceUID) }
+
+    /// True when the default output is a loudspeaker the microphone can hear (built-in speakers,
+    /// HDMI/DisplayPort monitors, AirPlay, Thunderbolt docks), so acoustic echo cancellation is
+    /// worth its CPU. False for headphones (built-in jack data source), Bluetooth and USB headsets,
+    /// and virtual devices (BlackHole, Zoom's). Unknown transports count as speakers (safe side).
+    static func outputIsLoudspeaker(_ device: AudioDeviceID = defaultOutputDevice) -> Bool {
+        guard device != unknown else { return true }
+        let transport = (try? get(device, kAudioDevicePropertyTransportType, initial: UInt32(0))) ?? 0
+        switch transport {
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+             kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeVirtual,
+             kAudioDeviceTransportTypeAggregate:
+            return false
+        case kAudioDeviceTransportTypeBuiltIn:
+            // Built-in output with headphones plugged in reports data source 'hdpn'.
+            var addr = address(kAudioDevicePropertyDataSource, scope: kAudioObjectPropertyScopeOutput)
+            var source: UInt32 = 0
+            var size = UInt32(MemoryLayout<UInt32>.size)
+            if AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &source) == noErr, source == 0x6864_706E { return false }
+            return true
+        default:
+            return true
+        }
+    }
     static func name(_ device: AudioDeviceID) -> String? { string(device, kAudioObjectPropertyName) }
 
     /// UIDs of every device visible to this process (includes our own private aggregates, which

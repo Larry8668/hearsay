@@ -170,6 +170,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.refresh()
             },
             setFontSize: { [weak self] size in self?.model.fontSize = size; self?.refresh() },
+            setEchoCancellation: { [weak self] raw in
+                guard let self, let choice = EchoCancellation(rawValue: raw), choice != EchoCancellation.current else { return }
+                EchoCancellation.current = choice
+                Log.info("echo cancellation set to \(raw)")
+                // The decision is baked into the mic engine: bounce the me lane if it's live.
+                if self.model.phase == .listening, SessionController.isEnabled(.me) {
+                    self.session.setEnabled(.me, false)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.session.setEnabled(.me, true) }
+                }
+                self.refresh()
+            },
             showWelcome: { [weak self] in self?.welcome.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
             openSettings: { SettingsLinks.open(for: $0) },
@@ -184,6 +195,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshVersion()
             },
             quit: { NSApp.terminate(nil) })
+    }
+
+    /// `SMAppService.status` is an XPC round trip (~100 ms blocked on the main thread); refresh()
+    /// runs every second, so cache it briefly and drop the cache when the user toggles it.
+    private var loginStatusCache: (at: Date, enabled: Bool)?
+    private func launchAtLoginEnabled() -> Bool {
+        if let c = loginStatusCache, Date().timeIntervalSince(c.at) < 5 { return c.enabled }
+        let enabled = SMAppService.mainApp.status == .enabled
+        loginStatusCache = (Date(), enabled)
+        return enabled
     }
 
     private func refresh() {
@@ -209,8 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bar?.setVisible(model.isActive && model.showRecordingBar)
         s.hasTranscript = !(session.store?.lines.isEmpty ?? true)
         s.sources = Dictionary(uniqueKeysWithValues: Speaker.allCases.map { ($0, SessionController.isEnabled($0)) })
-        s.launchAtLogin = SMAppService.mainApp.status == .enabled
+        s.launchAtLogin = launchAtLoginEnabled()
         s.fontSize = model.fontSize
+        s.echoCancellation = EchoCancellation.current.rawValue
         s.engine = model.engineID
         menuBar.update(s)
         panel.setTitle("hearsay — \(s.status)")
@@ -232,6 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Login item via SMAppService. Registers THIS bundle's path, so do it from the installed copy
     /// (/Applications), not from build/.
     private func toggleLoginItem() {
+        loginStatusCache = nil
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
             Log.info("launch at login \(SMAppService.mainApp.status == .enabled ? "enabled" : "disabled") for \(Bundle.main.bundlePath)")

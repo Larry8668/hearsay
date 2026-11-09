@@ -122,7 +122,11 @@ final class RecordingBar: NSObject {
                                     hover: { [weak self] in self?.hover($0) },
                                     dragBegan: { [weak self] in self?.userDragAt = Date() },
                                     snapBack: { [weak self] in self?.snapBack() })
-        p.contentView = FirstMouseHostingView(rootView: view)
+        let hosting = FirstMouseHostingView(rootView: view)
+        // The panel is sized explicitly (resizeWindow); without this, every SwiftUI change made
+        // AppKit re-run constraint layout for the whole window to re-derive the intrinsic size.
+        hosting.sizingOptions = []
+        p.contentView = hosting
         NotificationCenter.default.addObserver(self, selector: #selector(windowMoved), name: NSWindow.didMoveNotification, object: p)
         return p
     }
