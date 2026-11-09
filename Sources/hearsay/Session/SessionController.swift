@@ -6,7 +6,11 @@ import Foundation
 ///     engine.start(speaker:) events       ──────────▶  handle(_:)       (main actor)
 ///
 /// `.partial` → AppModel only; `.final` → TranscriptStore (disk) + AppModel; `.warning` → log +
-/// status line. Engines are created and prepared once at launch and reused for every session;
+/// status line. The feed task also measures each chunk's level for the recording bar's waveform.
+///
+/// Pause stops every lane exactly like Stop (sources off, engines flush their trailing text as
+/// finals) but keeps the store and the start time; Resume starts the lanes again into the same
+/// store. So while paused no audio is captured at all, which is the point of pausing. Engines are created and prepared once at launch and reused for every session;
 /// sources are created per start and dropped after stop.
 ///
 /// Main actor; nothing here blocks it: preparation, starts and stops are async tasks.
@@ -21,6 +25,8 @@ final class SessionController {
     private var prepareTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var stopTask: Task<Void, Never>?
+    /// Pause / resume lane work in flight; stop and the opposite transition wait for it.
+    private var pauseTask: Task<Void, Never>?
     /// Start was requested before the model was ready; begin as soon as it is.
     private var startWhenReady = false
     /// Every engine finished `prepare` (the model state can read .ready while the second is still loading).
@@ -48,6 +54,7 @@ final class SessionController {
     func setEnabled(_ s: Speaker, _ on: Bool) {
         UserDefaults.standard.set(on, forKey: "source.\(s.rawValue)")
         Log.info("source \(s.rawValue) \(on ? "enabled" : "disabled")")
+        // While paused only the preference changes; resume() starts whatever is enabled then.
         guard model.phase == .listening else { onChange(); return }
         Task {
             if on { await startLane(s) } else { await stopLane(s) }
@@ -96,7 +103,17 @@ final class SessionController {
 
     // MARK: Start / stop
 
-    func toggle() { if model.isListening { stop() } else { start() } }
+    /// ⌃⌥H: stops any session (listening OR paused), otherwise starts one.
+    func toggle() { if model.isActive { stop() } else { start() } }
+
+    /// ⌃⌥P: pause while listening, resume while paused, nothing otherwise.
+    func togglePause() {
+        switch model.phase {
+        case .listening: pause()
+        case .paused: resume()
+        default: break
+        }
+    }
 
     func start() {
         guard model.phase == .idle else { return }
@@ -117,7 +134,11 @@ final class SessionController {
         model.startedAt = now
         model.lines = []
         model.partials = [:]
+        model.pausedTotal = 0
+        model.pausedAt = nil
         model.permissionDenied = []
+        model.audio.reset()
+        model.audio.run()
         onChange()
         Log.info("session: starting \(speakers.map(\.rawValue))")
         startTask = Task {
@@ -127,6 +148,7 @@ final class SessionController {
                 Log.warn("session: no source could start")
                 store = previous
                 model.phase = .idle
+                model.audio.reset()
             } else if model.phase == .starting {
                 model.phase = .listening
             }
@@ -139,22 +161,74 @@ final class SessionController {
     @discardableResult
     func stop() -> Task<Void, Never>? {
         if startWhenReady { startWhenReady = false; model.phase = .idle; onChange(); return nil }
-        guard model.phase == .listening || model.phase == .starting else { return stopTask }
+        guard model.isActive else { return stopTask }
         model.phase = .stopping
         onChange()
         Log.info("session: stopping")
-        let pendingStart = startTask
+        let pending = [startTask, pauseTask]
         stopTask = Task {
-            await pendingStart?.value
+            for t in pending { await t?.value }
             for s in Array(lanes.keys) { await stopLane(s) }
-            store?.finish()
+            store?.finish()               // closes a pause still open (stop while paused)
             model.partials = [:]
+            model.pausedAt = nil
+            model.audio.reset()
             model.phase = .idle
             stopTask = nil
             onChange()
             Log.info("session: stopped")
         }
         return stopTask
+    }
+
+    /// Stops every lane (trailing finals still land in the store) but keeps the session: same
+    /// store, same start time. The pause is recorded in the store for the marker and header.
+    func pause() {
+        guard model.phase == .listening else { return }
+        let now = Date()
+        store?.beginPause(at: now)
+        model.pausedAt = now
+        model.phase = .paused
+        model.audio.freeze()
+        onChange()
+        Log.info("session: pausing")
+        let previous = pauseTask
+        pauseTask = Task {
+            await previous?.value
+            for s in Array(lanes.keys) { await stopLane(s) }
+            model.partials = [:]
+            pauseTask = nil
+            Log.info("session: paused")
+        }
+    }
+
+    /// Restarts the enabled lanes into the same store.
+    func resume() {
+        guard model.phase == .paused else { return }
+        let now = Date()
+        store?.endPause(at: now)
+        if let p = model.pausedAt { model.pausedTotal += now.timeIntervalSince(p) }
+        model.pausedAt = nil
+        model.phase = .starting
+        model.audio.run()
+        onChange()
+        Log.info("session: resuming")
+        let previous = pauseTask
+        pauseTask = Task {
+            await previous?.value
+            for s in Speaker.allCases where Self.isEnabled(s) { await startLane(s) }
+            pauseTask = nil
+            if lanes.isEmpty {
+                // Nothing could start (both sources off, permission revoked): end the session
+                // rather than pretend to listen.
+                Log.warn("session: resume found no source to start; stopping")
+                stop()
+            } else if model.phase == .starting {
+                model.phase = .listening
+                Log.info("session: resumed")
+            }
+            onChange()
+        }
     }
 
     /// Quit path: stop and finalise, but never hold the quit longer than `timeout` (a wedged engine
@@ -209,8 +283,12 @@ final class SessionController {
         lane.events = Task { [weak self] in
             for await event in events { self?.handle(event) }
         }
+        let meter = model.audio.meter
         lane.feed = Task.detached(priority: .userInitiated) { [weak self] in
-            for await chunk in chunks { await engine.feed(chunk) }
+            for await chunk in chunks {
+                meter.report(s, samples: chunk.samples)
+                await engine.feed(chunk)
+            }
             await self?.sourceEnded(s, lane: lane)
         }
     }

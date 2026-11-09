@@ -20,6 +20,8 @@ final class TranscriptStore {
     let engine: String
     private(set) var endedAt: Date?
     private(set) var lines: [TranscriptLine] = []
+    /// Pauses in order; the last one is open (`end == nil`) while paused.
+    private(set) var pauses: [PauseInterval] = []
     let formatter: TranscriptFormatter
     /// Fixed at creation from `startedAt`; " 2", " 3"… appended if that minute is taken.
     let markdownURL: URL
@@ -70,9 +72,27 @@ final class TranscriptStore {
         return lo
     }
 
+    // MARK: Pauses
+
+    var isPaused: Bool { pauses.last.map { $0.end == nil } ?? false }
+
+    func beginPause(at date: Date = Date()) {
+        guard !isPaused else { return }
+        pauses.append(PauseInterval(start: date))
+        if !lines.isEmpty { scheduleWrite() }   // a pause before any speech leaves no file yet
+    }
+
+    func endPause(at date: Date = Date()) {
+        guard isPaused else { return }
+        pauses[pauses.count - 1].end = max(date, pauses[pauses.count - 1].start)
+        if !lines.isEmpty { scheduleWrite() }
+    }
+
     /// Stamps the end time and writes immediately (synchronously, so callers on the quit path can
-    /// rely on the file being complete when this returns).
+    /// rely on the file being complete when this returns). A pause still open (stop or quit while
+    /// paused) is closed at `end`.
     func finish(at end: Date = Date()) {
+        endPause(at: end)
         endedAt = end
         writePending = false
         guard !lines.isEmpty else { Log.info("transcript: no lines, nothing saved"); return }
@@ -108,8 +128,12 @@ final class TranscriptStore {
 
     private struct Snapshot { var dir: URL; var md: URL; var json: URL; var markdown: String; var sidecar: Data }
 
-    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine] }`.
-    struct Sidecar: Codable { var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine] }
+    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses? }`.
+    /// `pauses` is optional so sidecars written before pause existed still decode (same version).
+    struct Sidecar: Codable {
+        var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine]
+        var pauses: [PauseInterval]?
+    }
 
     /// ISO 8601 with milliseconds: whole seconds would lose the order of lines that start in the
     /// same second when the sidecar is read back.
@@ -142,8 +166,9 @@ final class TranscriptStore {
     }
 
     private func render() -> Snapshot {
-        let md = formatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine)
-        let data = (try? TranscriptStore.jsonEncoder.encode(Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines))) ?? Data()
+        let md = formatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses)
+        let side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        let data = (try? TranscriptStore.jsonEncoder.encode(side)) ?? Data()
         return Snapshot(dir: directory, md: markdownURL, json: jsonURL, markdown: md, sidecar: data)
     }
 
