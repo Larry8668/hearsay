@@ -33,7 +33,7 @@ final class RecordingBar: NSObject {
 
     /// Height of the shapes' area: controls + the tallest captions card (two blocks). The window
     /// is always this tall; see "Captions on / off".
-    static let fullHeight = controlsHeight + gap + CaptionMetrics.cardHeight(2)
+    static let fullHeight = controlsHeight + gap + CaptionMetrics.cardHeight(CaptionsFeed.maxBlocks)
 
     private let model: AppModel
     private let actions: Actions

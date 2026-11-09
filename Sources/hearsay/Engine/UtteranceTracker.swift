@@ -114,6 +114,8 @@ struct UtteranceTracker {
     let config: Config
     private(set) var clock = SampleClock()
     private var votes = AppVotes()
+    /// App the line in progress is coming from, by voiced-chunk votes so far.
+    var currentApp: String? { votes.winner }
     private static let frame = 320  // 20 ms at 16 kHz
 
     /// Sample index where the current (uncommitted) line's audio region begins.

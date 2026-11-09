@@ -21,6 +21,18 @@ The first time you start, macOS asks for **Microphone** and **System Audio Recor
 said no, the menu shows *Microphone access denied — Open settings…*; turn hearsay on there and start
 again.
 
+## Several apps at once
+
+Each app that plays sound is captured on its own: a video in Zen and a Meet call in Chrome are
+transcribed separately and never blend into one line, and each gets its own label and its own
+caption block ("them · Zen", "them · Chrome"). Up to four apps are transcribed at once; each app
+that is actually talking costs about 5% CPU and 20 MB while it talks, and nothing while silent.
+
+Tabs inside one browser cannot be told apart: every browser mixes its tabs before the sound
+leaves it, so two Zen tabs are one "them · Zen". For a meeting plus a video, keep them in
+different apps. `defaults write dev.hearsay.app perAppAudio -bool false` goes back to a single
+mixed stream labelled with whichever app is playing.
+
 ## Me and them: blue and orange
 
 Everywhere hearsay shows the two sides, **me is blue** and **them is orange**: the chips in the live

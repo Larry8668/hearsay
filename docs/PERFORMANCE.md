@@ -9,6 +9,7 @@ Parakeet Unified 0.6B (640 ms), `top` over 3 s. CPU is percent of one core.
 | Listening, headphones (echo cancellation off), silence | ~6% | 70 MB |
 | Listening, headphones, continuous speech, bar shown | ~14% | 75 MB |
 | Listening, speakers (echo cancellation on), silence | ~33% | 100 MB |
+| Listening, echo cancellation off, two apps talking at once (two "them" streams) | ~24% | 85 MB |
 | Recording bar (its share of the above) | ~3% | — |
 | Engines alone, two streams of continuous speech (CLI) | 1.5–2.5% | 65 MB |
 
@@ -17,6 +18,10 @@ Where it goes:
 - **Apple voice processing (echo cancellation) ≈ 25%.** Intrinsic to the system AU; nothing in
   hearsay's code. That is why it is only enabled while the output is a loudspeaker
   (`EchoCancellation.auto`, see `MicCapture.swift`).
+- **Per-app system audio**: one process tap and one model stream per app that plays
+  (`PerAppAudioTap`, `PerAppEngine`). A stream opens on an app's first voiced chunk and closes
+  after 20 s without audio; silent apps forward nothing. Each app talking costs ~5% (its model
+  stream, RTF 0.045) and ~20 MB; the taps themselves are negligible.
 - **Speech models ≈ 1% per stream.** The encoder runs on the Neural Engine; the decoder on CPU.
   Streaming encoders process audio continuously, so silence costs about the same as speech for
   the mic lane; the system-audio lane is free while no app plays sound.

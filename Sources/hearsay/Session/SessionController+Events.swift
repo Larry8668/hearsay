@@ -5,19 +5,22 @@ import Foundation
 extension SessionController {
     func handle(_ event: EngineEvent) {
         switch event {
-        case .partial(let text, let speaker):
+        case .partial(let text, let speaker, let app):
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let voice = Voice(speaker: speaker, app: app)
             if speaker == .them {
                 echo.observeThemPartial(text: t, now: Date())
+                // The app of a line is a running vote; once it is known the unlabelled entry is stale.
+                if app != nil { model.partials[Voice(speaker: .them)] = nil }
             } else if !t.isEmpty, echo.checkMePartial(text: t, now: Date()) {
                 // Looks like the speakers heard by the mic: don't show it. The final decides.
                 model.partials[.me] = nil
                 return
             }
-            model.partials[speaker] = t.isEmpty ? nil : t
+            model.partials[voice] = t.isEmpty ? nil : t
         case .final(let line):
             guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                model.partials[line.speaker] = nil; return
+                model.clearPartial(for: line); return
             }
             if line.speaker == .them {
                 echo.observeThemFinal(text: line.text, start: line.start, end: line.end)

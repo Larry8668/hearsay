@@ -23,8 +23,8 @@ final class AppModel: ObservableObject {
     }
     /// Committed lines of the current (or last) session, sorted by start time.
     @Published var lines: [TranscriptLine] = []
-    /// In-progress text per speaker; cleared when that speaker's final arrives.
-    @Published var partials: [Speaker: String] = [:]
+    /// In-progress text per voice (speaker, and app for "them"); cleared when that voice's final arrives.
+    @Published var partials: [Voice: String] = [:]
     @Published var modelState: ModelState = .notDownloaded
     @Published var engineID = ""
     /// Last engine/source warning, cleared after a while.
@@ -94,6 +94,17 @@ final class AppModel: ObservableObject {
     /// Inserts keeping start-time order (same rule as TranscriptStore).
     func insert(_ line: TranscriptLine) {
         lines.insert(line, at: TranscriptStore.insertionIndex(for: line.start, in: lines))
-        partials[line.speaker] = nil
+        clearPartial(for: line)
+    }
+
+    /// Drops the in-progress text the line replaces: its voice, and for "them" also the entry
+    /// that had no app yet (the app is a running vote, so a partial can precede its label).
+    func clearPartial(for line: TranscriptLine) {
+        partials[Voice(line)] = nil
+        if line.speaker == .them { partials[Voice(speaker: .them)] = nil }
+    }
+
+    func clearPartials(_ speaker: Speaker) {
+        for v in partials.keys where v.speaker == speaker { partials[v] = nil }
     }
 }

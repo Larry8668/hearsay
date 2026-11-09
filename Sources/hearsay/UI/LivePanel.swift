@@ -115,8 +115,8 @@ struct LiveTranscriptView: View {
                                 row(line, chip: startsGroup(i), compact: compact)
                             }
                         }
-                        ForEach(Speaker.allCases, id: \.self) { s in
-                            if let p = model.partials[s] { partialRow(s, p, compact: compact, textWidth: textWidth).padding(.top, 8) }
+                        ForEach(model.partials.keys.sorted(by: Voice.displayOrder), id: \.self) { v in
+                            if let p = model.partials[v] { partialRow(v, p, compact: compact, textWidth: textWidth).padding(.top, 8) }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .background(GeometryReader { g in
@@ -229,9 +229,9 @@ struct LiveTranscriptView: View {
 
     /// Words in progress: the normal font, dimmed, and only the last ~3 lines of it, so a long
     /// hypothesis that hasn't committed yet never fills the window.
-    private func partialRow(_ s: Speaker, _ text: String, compact: Bool, textWidth: CGFloat) -> some View {
+    private func partialRow(_ v: Voice, _ text: String, compact: Bool, textWidth: CGFloat) -> some View {
         layout(compact: compact) {
-            Chip(text: LaneColors.chipLabel(s, app: s == .them ? lastThemApp : nil), color: LaneColors.adaptive(s), size: 11)
+            Chip(text: LaneColors.chipLabel(v.speaker, app: v.app), color: LaneColors.adaptive(v.speaker), size: 11)
         } time: {
             TypingDots()
         } text: {
@@ -253,8 +253,6 @@ struct LiveTranscriptView: View {
         if let sp = t.firstIndex(of: " ") { t = t[t.index(after: sp)...] }
         return "…" + t
     }
-
-    private var lastThemApp: String? { model.lines.last(where: { $0.speaker == .them && $0.sourceApp != nil })?.sourceApp }
 
     // MARK: Footer
 

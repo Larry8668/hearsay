@@ -84,7 +84,7 @@ extension SessionController {
         await engines[s]?.stop()
         await lane.events?.value
         lane.events = nil
-        model.partials[s] = nil
+        model.clearPartials(s)
         Log.info("lane \(s.rawValue): paused (source keeps running)")
     }
 
@@ -111,7 +111,7 @@ extension SessionController {
         await engines[s]?.stop()          // flush: trailing final, then the event stream ends
         await lane.events?.value          // …and every final has been stored
         lanes[s] = nil
-        model.partials[s] = nil
+        model.clearPartials(s)
         Log.info("lane \(s.rawValue): stopped")
     }
 

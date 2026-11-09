@@ -85,7 +85,7 @@ final class SessionController {
     func prepareEngines() {
         guard prepareTask == nil, !enginesReady else { return }
         if engines.isEmpty {
-            for s in Speaker.allCases { engines[s] = Wiring.makeEngine() }
+            for s in Speaker.allCases { engines[s] = Wiring.makeEngine(for: s) }
             model.engineID = engines[.me]?.identifier ?? ""
         }
         let engines = Speaker.allCases.compactMap { self.engines[$0] }

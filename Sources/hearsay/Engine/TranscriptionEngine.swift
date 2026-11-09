@@ -2,8 +2,9 @@ import Foundation
 
 /// What an engine emits while listening.
 enum EngineEvent: Sendable {
-    /// Best guess for the utterance in progress. Replaces the previous partial for this speaker.
-    case partial(text: String, speaker: Speaker)
+    /// Best guess for the utterance in progress. Replaces the previous partial for this voice
+    /// (speaker + app; `app` is nil for the microphone or when no app is known).
+    case partial(text: String, speaker: Speaker, app: String?)
     /// A committed line. `start`/`end` are wall-clock times derived from the chunk timestamps.
     case final(TranscriptLine)
     /// Non-fatal problem worth surfacing (model fell behind, device glitch).

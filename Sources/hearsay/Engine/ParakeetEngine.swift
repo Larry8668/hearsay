@@ -185,7 +185,7 @@ private struct Job: Sendable {
 
             let pending = tracker.pending
             if pending != lastPartialText, clock.now - lastPartialAt >= partialInterval {
-                out.yield(.partial(text: pending, speaker: speaker))
+                out.yield(.partial(text: pending, speaker: speaker, app: tracker.currentApp))
                 lastPartialText = pending
                 lastPartialAt = clock.now
             }

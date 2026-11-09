@@ -105,7 +105,7 @@ enum EngineProbe {
                 let tag = engines.count > 1 ? "\(speaker.rawValue): " : ""
                 for await ev in events {
                     switch ev {
-                    case .partial(let text, _):
+                    case .partial(let text, _, _):
                         firstPartial.mark(Date().timeIntervalSince(t0))
                         print("~ \(tag)\(text)")
                     case .final(let l):

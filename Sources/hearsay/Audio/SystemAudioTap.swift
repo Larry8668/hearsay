@@ -266,9 +266,17 @@ final class SystemAudioTap: AudioSource {
     /// a helper (Safari → "com.apple.WebKit.GPU", Chrome → "com.google.Chrome.helper"), and that
     /// "running output" includes apps holding an idle-but-open output stream.
     static func activeOutputApps() -> [String] {
+        var result: [String] = []
+        for p in runningOutputProcesses() where !result.contains(p.app) { result.append(p.app) }
+        return result
+    }
+
+    /// Every audio process object whose output is running right now, with the app it belongs to
+    /// (see `activeOutputApps`). One app may have several (a browser's helpers). Ours excluded.
+    static func runningOutputProcesses() -> [(object: AudioObjectID, app: String)] {
         let own = getpid()
         let objects = (try? CA.getArray(CA.system, kAudioHardwarePropertyProcessObjectList, zero: CA.unknown)) ?? []
-        var result: [String] = []
+        var result: [(object: AudioObjectID, app: String)] = []
         for obj in objects {
             let running = (try? CA.get(obj, kAudioProcessPropertyIsRunningOutput, initial: UInt32(0))) ?? 0
             guard running != 0 else { continue }
@@ -283,7 +291,7 @@ final class SystemAudioTap: AudioSource {
             if name.isEmpty, pid > 0 {
                 name = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? executableName(pid) ?? ""
             }
-            if !name.isEmpty, !result.contains(name) { result.append(name) }
+            if !name.isEmpty { result.append((obj, name)) }
         }
         return result
     }

@@ -10,15 +10,20 @@ import SwiftUI
 /// block comes or goes. A 1 s timer expires silent speakers and publishes nothing otherwise.
 final class CaptionsFeed: ObservableObject {
     struct Block: Equatable, Identifiable {
-        var speaker: Speaker
+        var voice: Voice
         var chip: String
         /// Lines committed while this block has been up, oldest first, one per utterance.
         var committed: [String]
         var partial: String
-        var id: Speaker { speaker }
+        var speaker: Speaker { voice.speaker }
+        var id: Voice { voice }
     }
 
-    /// Speaker order is fixed (me, then them) so blocks never swap places.
+    /// Blocks shown at once: me plus up to two apps. The bar's window is sized for this many.
+    static let maxBlocks = 3
+
+    /// Order is fixed (me first, then "them" voices in order of first appearance) so blocks never
+    /// swap places.
     @Published private(set) var blocks: [Block] = []
     /// Width of the chip column: fits the widest chip seen this session ("them" at least) and
     /// never shrinks, so text doesn't shift sideways when the other speaker's block comes or goes.
@@ -39,9 +44,11 @@ final class CaptionsFeed: ObservableObject {
     private var subs: Set<AnyCancellable> = []
     private var timer: Timer?
     private var seen: Set<UUID> = []
-    private var lines: [Speaker: [String]] = [:]
-    private var lastActivity: [Speaker: Date] = [:]
-    private var lastPartial: [Speaker: String] = [:]
+    private var lines: [Voice: [String]] = [:]
+    private var lastActivity: [Voice: Date] = [:]
+    private var lastPartial: [Voice: String] = [:]
+    /// Voices in order of first appearance this session.
+    private var order: [Voice] = []
 
     init(model: AppModel) {
         self.model = model
@@ -81,38 +88,55 @@ final class CaptionsFeed: ObservableObject {
         timer = t
     }
 
-    private func update(lines all: [TranscriptLine], partials: [Speaker: String], now: Date = Date()) {
+    private func noteActivity(_ v: Voice, at now: Date) {
+        lastActivity[v] = now
+        if !order.contains(v) { order.append(v) }
+    }
+
+    private func update(lines all: [TranscriptLine], partials: [Voice: String], now: Date = Date()) {
         // New lines can land anywhere near the end (they're sorted by start time); a short
         // suffix is enough to find them without walking a long transcript.
         for line in all.suffix(24) where !seen.contains(line.id) {
             seen.insert(line.id)
             let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
-            lines[line.speaker, default: []].append(text)
-            lines[line.speaker] = Array(lines[line.speaker]!.suffix(Self.keepLines))
-            lastActivity[line.speaker] = now
+            let v = Voice(line)
+            lines[v, default: []].append(text)
+            lines[v] = Array(lines[v]!.suffix(Self.keepLines))
+            noteActivity(v, at: now)
         }
         if all.isEmpty {   // a new session
-            seen.removeAll(); lines.removeAll()
+            seen.removeAll(); lines.removeAll(); order.removeAll(); lastActivity.removeAll()
             if chipColumn != Self.chipWidth("them") { chipColumn = Self.chipWidth("them") }
         }
-        for s in Speaker.allCases {
-            let p = partials[s] ?? ""
-            if p != lastPartial[s] ?? "" { lastPartial[s] = p; if !p.isEmpty { lastActivity[s] = now } }
+        for v in Set(partials.keys).union(lastPartial.keys) {
+            let p = partials[v] ?? ""
+            if p != lastPartial[v] ?? "" {
+                lastPartial[v] = p.isEmpty ? nil : p
+                if !p.isEmpty { noteActivity(v, at: now) }
+            }
         }
 
-        let app = all.last(where: { $0.speaker == .them && $0.sourceApp != nil })?.sourceApp
+        // me first, then "them" voices as they appeared. Expired voices drop out of the order so
+        // a later return puts them at the end again.
+        order.sort { a, b in a.speaker != b.speaker ? a.speaker == .me : false }   // stable: keeps appearance order within them
         var next: [Block] = []
-        for s in Speaker.allCases {
-            guard let at = lastActivity[s] else { continue }
-            let partial = Self.capped(lastPartial[s] ?? "")
+        for v in order {
+            guard let at = lastActivity[v] else { continue }
+            let partial = Self.capped(lastPartial[v] ?? "")
             if now.timeIntervalSince(at) > Self.silence && partial.isEmpty {
-                lines[s] = nil; lastActivity[s] = nil
+                lines[v] = nil; lastActivity[v] = nil
                 continue
             }
-            let committed = lines[s] ?? []
+            let committed = lines[v] ?? []
             guard !committed.isEmpty || !partial.isEmpty else { continue }
-            next.append(Block(speaker: s, chip: LaneColors.chipLabel(s, app: app), committed: committed, partial: partial))
+            next.append(Block(voice: v, chip: LaneColors.chipLabel(v.speaker, app: v.app), committed: committed, partial: partial))
+        }
+        order.removeAll { lastActivity[$0] == nil }
+        // Too many voices: keep me and the most recently active apps.
+        while next.count > Self.maxBlocks, let i = next.indices.filter({ next[$0].speaker == .them })
+                .min(by: { (lastActivity[next[$0].voice] ?? .distantPast) < (lastActivity[next[$1].voice] ?? .distantPast) }) {
+            next.remove(at: i)
         }
         for b in next where b.speaker == .them {
             let w = Self.chipWidth(b.chip)
