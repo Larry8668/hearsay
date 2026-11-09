@@ -10,7 +10,7 @@
 # download. The postflight below removes the quarantine attribute (Homebrew 7 dropped --no-quarantine).
 cask "hearsay" do
   version "0.1.0"
-  sha256 "REPLACE_ON_RELEASE"
+  sha256 "f7d451f5c421eaed334d536a2f7de8de0147e5dced3e2d16d0fb4f39bb6b39af"
 
   url "https://github.com/Larry8668/hearsay/releases/download/v#{version}/hearsay-#{version}.zip"
   name "hearsay"
