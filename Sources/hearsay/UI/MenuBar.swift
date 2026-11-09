@@ -16,7 +16,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var toggleSource: (Speaker) -> Void
         var toggleLoginItem: () -> Void
         var toggleRecordingBar: () -> Void
-        var toggleBarHover: () -> Void
         var setFontSize: (Double) -> Void
         var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
         var showWelcome: () -> Void
@@ -41,7 +40,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var paused = false
         var canPause = false
         var showBar = true
-        var barHover = true
         var busy = false              // starting / stopping
         var panelVisible = false
         var hasTranscript = false
@@ -65,7 +63,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let startStopItem = NSMenuItem()
     private let pauseItem = NSMenuItem()
     private let barItem = NSMenuItem()
-    private let barHoverItem = NSMenuItem()
     private let panelItem = NSMenuItem()
     private let openItem = NSMenuItem()
     private let srtItem = NSMenuItem()
@@ -163,9 +160,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         barItem.title = "Show recording bar"
         bind(barItem, #selector(toggleRecordingBar))
         settings.addItem(barItem)
-        barHoverItem.title = "Expand recording bar on hover"
-        bind(barHoverItem, #selector(toggleBarHover))
-        settings.addItem(barHoverItem)
         echoItem.title = "Echo cancellation"
         let echo = NSMenu()
         for choice in EchoCancellation.allCases {
@@ -262,8 +256,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         pauseItem.isHidden = !s.listening
         pauseItem.isEnabled = s.canPause || s.paused
         barItem.state = s.showBar ? .on : .off
-        barHoverItem.state = s.barHover ? .on : .off
-        barHoverItem.isEnabled = s.showBar
         panelItem.state = s.panelVisible ? .on : .off
         copyItem.isEnabled = s.hasTranscript
         srtItem.isEnabled = s.hasTranscript
@@ -305,7 +297,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func togglePause() { actions.togglePause() }
     @objc private func togglePanel() { actions.togglePanel() }
     @objc private func toggleRecordingBar() { actions.toggleRecordingBar() }
-    @objc private func toggleBarHover() { actions.toggleBarHover() }
     @objc private func openTranscript() { actions.openTranscript() }
     @objc private func openFolder() { actions.openFolder() }
     @objc private func exportSRT() { actions.exportSRT() }

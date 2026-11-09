@@ -125,6 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
         if WelcomeWindow.shouldShowAutomatically { welcome.show() }
         DebugSnapshot.installIfRequested { [weak self] in self?.menuBar.menuDescription ?? "" }
+        DebugSnapshot.runScriptIfRequested([
+            "panel": { [weak self] in self?.panel.toggle() },
+            "pause": { [weak self] in self?.session.togglePause() },
+            "captions": { [weak self] in self?.bar.toggleCaptions() },
+        ])
         Log.info("launched (engine \(model.engineID))")
     }
 
@@ -164,11 +169,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleSource: { [weak self] s in self?.session.setEnabled(s, !SessionController.isEnabled(s)) },
             toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
             toggleRecordingBar: { [weak self] in self?.model.showRecordingBar.toggle(); self?.refresh() },
-            toggleBarHover: { [weak self] in
-                self?.model.expandBarOnHover.toggle()
-                self?.bar.updateExpanded()
-                self?.refresh()
-            },
             setFontSize: { [weak self] size in self?.model.fontSize = size; self?.refresh() },
             setEchoCancellation: { [weak self] raw in
                 guard let self, let choice = EchoCancellation(rawValue: raw), choice != EchoCancellation.current else { return }
@@ -221,7 +221,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.paused = model.phase == .paused
         s.canPause = model.phase == .listening
         s.showBar = model.showRecordingBar
-        s.barHover = model.expandBarOnHover
         s.busy = model.phase == .starting || model.phase == .stopping
         s.panelVisible = panel.isVisible
         if model.panelVisible != s.panelVisible { model.panelVisible = s.panelVisible }

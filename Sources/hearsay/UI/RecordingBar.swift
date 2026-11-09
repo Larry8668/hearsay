@@ -1,9 +1,10 @@
 import AppKit
+import Combine
 import SwiftUI
 
-/// The floating capsule at the bottom of the screen while a session is listening or paused:
-/// status dot, two-lane waveform, elapsed time, pause / stop / transcript buttons, and an
-/// expanded state with the latest words from each lane.
+/// The floating bar at the bottom of the screen while a session is listening or paused: a
+/// captions card (the last two lines from each speaker) above a controls capsule (status dot,
+/// two-lane waveform, elapsed time, pause / stop / transcript / captions buttons).
 ///
 /// Window mechanics live here; the look is `RecordingBarView`. Like the menu bar it's a pure
 /// view: it shows `AppModel` and does everything through `actions`.
@@ -18,33 +19,44 @@ final class RecordingBar: NSObject {
         var togglePanel: () -> Void
     }
 
-    /// Capsule sizes (pt). The window is the capsule plus `margin` on every side for the shadow.
-    static let collapsed = CGSize(width: 372, height: 44)
-    /// Same width as collapsed: the buttons must not move when hover expands the bar.
-    static let expanded = CGSize(width: 372, height: 104)
-    static let margin: CGFloat = 22
+    /// Width of both shapes (pt); the controls capsule is `controlsHeight` tall.
+    static let width: CGFloat = 560
+    static let controlsHeight: CGFloat = 44
+    /// Gap between the captions card and the controls.
+    static let gap: CGFloat = 8
+    /// Transparent border around the shapes: room for their shadow (radius 18, y 6).
+    static let margin: CGFloat = 26
     /// Gap between the capsule and the bottom of the visible frame (the Dock's top edge).
     static let bottomGap: CGFloat = 14
     private static let anchorKey = "recordingBar.anchor"
+    static let captionsKey = "recordingBar.captions"
+
+    /// Height of the shapes' area: controls + the tallest captions card (two blocks). The window
+    /// is always this tall; see "Captions on / off".
+    static let fullHeight = controlsHeight + gap + CaptionMetrics.cardHeight(2)
 
     private let model: AppModel
     private let actions: Actions
     let state = RecordingBarState()
+    private lazy var feed = CaptionsFeed(model: model)
     private var panel: NSPanel?
     /// What we were last asked for; animations check it so a quick show→hide→show ends right.
     private var wantVisible = false
-    private var collapseWork: DispatchWorkItem?
-    private var hoverWork: DispatchWorkItem?
     /// When the user last pressed on the bar's background. `performDrag` returns before the
     /// window moves, so moves seen shortly after this are the user's and get remembered; our own
-    /// moves (slide in/out, expand, snap back) never set it.
+    /// moves (slide in/out, captions, snap back) never set it.
     private var userDragAt: Date?
     private var saveWork: DispatchWorkItem?
+    private var subs: Set<AnyCancellable> = []
 
     init(model: AppModel, actions: Actions) {
         self.model = model
         self.actions = actions
         super.init()
+        state.captions = UserDefaults.standard.object(forKey: Self.captionsKey) as? Bool ?? true
+        // Only real changes reach the bar's SwiftUI tree (see RecordingBarState).
+        model.$phase.removeDuplicates().sink { [weak self] in self?.state.phase = $0 }.store(in: &subs)
+        model.$panelVisible.removeDuplicates().sink { [weak self] in self?.state.panelVisible = $0 }.store(in: &subs)
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
@@ -56,6 +68,7 @@ final class RecordingBar: NSObject {
     func setVisible(_ visible: Bool) {
         guard visible != wantVisible else { return }
         wantVisible = visible
+        feed.setActive(visible)
         visible ? slideIn() : slideOut()
     }
 
@@ -63,10 +76,7 @@ final class RecordingBar: NSObject {
     private func slideIn() {
         let p = panel ?? make()
         panel = p
-        state.pin = .auto            // a new session starts un-pinned
-        state.hovering = false
-        applyExpanded(false, animated: false)
-        let target = frame(for: Self.collapsed)
+        let target = frame()
         var start = target
         start.origin.y = (screen(containing: target)?.frame.minY ?? 0) - target.height
         p.setFrame(start, display: false)
@@ -79,6 +89,13 @@ final class RecordingBar: NSObject {
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 1.18, 0.35, 1)
             p.animator().setFrame(target, display: true)
             p.animator().alphaValue = 1
+        }
+        // With the display asleep the frame animation never runs and the bar would stay below
+        // the screen; make sure it ends up in place either way.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self = self, self.wantVisible, p.frame.minY < target.minY - 1 else { return }
+            p.setFrame(self.frame(), display: true)
+            p.alphaValue = 1
         }
     }
 
@@ -99,7 +116,7 @@ final class RecordingBar: NSObject {
     }
 
     private func make() -> NSPanel {
-        let p = RecordingBarPanel(contentRect: NSRect(origin: .zero, size: Self.windowSize(Self.collapsed)),
+        let p = RecordingBarPanel(contentRect: NSRect(origin: .zero, size: Self.windowSize),
                                   styleMask: [.borderless, .nonactivatingPanel, .utilityWindow],
                                   backing: .buffered, defer: false)
         p.isFloatingPanel = true
@@ -111,91 +128,49 @@ final class RecordingBar: NSObject {
         p.isMovableByWindowBackground = true
         p.isOpaque = false
         p.backgroundColor = .clear
-        // The capsule draws its own SwiftUI shadow: a window shadow is computed from the alpha mask
-        // once and would lag behind the expand/collapse animation.
+        // The shapes draw their own SwiftUI shadow: a window shadow is computed from the alpha
+        // mask and would lag behind the captions card fading in and out.
         p.hasShadow = false
         p.isReleasedWhenClosed = false
         p.appearance = NSAppearance(named: .darkAqua)   // reads the same over any content
         p.setAccessibilityLabel("hearsay recording bar")
-        let view = RecordingBarView(model: model, bar: state, actions: actions,
-                                    toggleExpanded: { [weak self] in self?.toggleExpanded() },
-                                    hover: { [weak self] in self?.hover($0) },
+        let view = RecordingBarView(model: model, bar: state, feed: feed, actions: actions,
+                                    toggleCaptions: { [weak self] in self?.toggleCaptions() },
                                     dragBegan: { [weak self] in self?.userDragAt = Date() },
                                     snapBack: { [weak self] in self?.snapBack() })
         let hosting = FirstMouseHostingView(rootView: view)
-        // The panel is sized explicitly (resizeWindow); without this, every SwiftUI change made
-        // AppKit re-run constraint layout for the whole window to re-derive the intrinsic size.
+        // The panel is sized explicitly; without this, every SwiftUI change made AppKit re-run
+        // constraint layout for the whole window to re-derive the intrinsic size.
         hosting.sizingOptions = []
+        hosting.safeAreaRegions = []
         p.contentView = hosting
         NotificationCenter.default.addObserver(self, selector: #selector(windowMoved), name: NSWindow.didMoveNotification, object: p)
         return p
     }
 
-    // MARK: Expanded state
+    // MARK: Captions on / off
 
-    private func toggleExpanded() {
-        // The chevron pins: open stays open; closing it stops hover from re-opening this session.
-        state.pin = state.expanded ? .collapsed : .expanded
-        updateExpanded()
-    }
-
-    /// Hover expands after 350 ms (so passing the pointer over the bar doesn't flap it) and
-    /// collapses shortly after the pointer leaves.
-    private func hover(_ inside: Bool) {
-        hoverWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.state.hovering = inside
-            self?.updateExpanded()
-        }
-        hoverWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + (inside ? 0.35 : 0.5), execute: work)
-    }
-
-    func updateExpanded() {
-        let want: Bool
-        switch state.pin {
-        case .expanded: want = true
-        case .collapsed: want = false
-        case .auto: want = state.hovering && model.expandBarOnHover
-        }
-        if want != state.expanded { applyExpanded(want, animated: true) }
-    }
-
-    /// Growing: enlarge the window first (the capsule is bottom-anchored inside it, so nothing
-    /// moves), then animate the capsule. Shrinking: animate, then trim the window so its
-    /// transparent part never sits over the call app's controls.
-    private func applyExpanded(_ on: Bool, animated: Bool) {
-        collapseWork?.cancel()
-        let spring = Animation.spring(response: 0.35, dampingFraction: 0.85)
-        if on {
-            resizeWindow(to: Self.expanded)
-            if animated { withAnimation(spring) { state.expanded = true } } else { state.expanded = true }
-        } else {
-            if animated { withAnimation(spring) { state.expanded = false } } else { state.expanded = false }
-            let work = DispatchWorkItem { [weak self] in
-                guard let self = self, !self.state.expanded else { return }
-                self.resizeWindow(to: Self.collapsed)
-            }
-            collapseWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + (animated ? 0.45 : 0), execute: work)
-        }
-    }
-
-    private func resizeWindow(to capsule: CGSize) {
-        guard let p = panel else { return }
-        let anchor = NSPoint(x: p.frame.midX, y: p.frame.minY + Self.margin)
-        p.setFrame(Self.frame(capsule, anchor: anchor), display: true)
+    /// WHY the window never changes size: growing a window that shows SwiftUI content let the
+    /// window server show one frame of the new content top-anchored in the old frame (the
+    /// controls vanished and the card flashed where they had been; the old hover-expand's "moves
+    /// up, then down"). So the window is always tall enough for two caption blocks and the card
+    /// comes and goes inside it, with the controls bottom-anchored and never moving. The space
+    /// above a short card is fully transparent, and transparent pixels of a non-opaque window
+    /// let clicks through to the app underneath, like the shadow margin always has.
+    func toggleCaptions() {
+        let on = !state.captions
+        Log.info("recording bar: captions \(on ? "shown" : "hidden")")
+        UserDefaults.standard.set(on, forKey: Self.captionsKey)
+        withAnimation(on ? .easeOut(duration: 0.25) : .easeIn(duration: 0.2)) { state.captions = on }
     }
 
     // MARK: Position
 
-    static func windowSize(_ capsule: CGSize) -> CGSize {
-        CGSize(width: capsule.width + 2 * margin, height: capsule.height + 2 * margin)
-    }
+    static let windowSize = CGSize(width: width + 2 * margin, height: fullHeight + 2 * margin)
 
     /// Window frame whose capsule's bottom-centre sits at `anchor`.
-    static func frame(_ capsule: CGSize, anchor: NSPoint) -> NSRect {
-        let size = windowSize(capsule)
+    static func frame(anchor: NSPoint) -> NSRect {
+        let size = windowSize
         return NSRect(x: (anchor.x - size.width / 2).rounded(), y: (anchor.y - margin).rounded(),
                       width: size.width, height: size.height)
     }
@@ -215,7 +190,7 @@ final class RecordingBar: NSObject {
         return NSPoint(x: vf.midX, y: vf.minY + bottomGap)
     }
 
-    private func frame(for capsule: CGSize) -> NSRect { Self.frame(capsule, anchor: anchor()) }
+    private func frame() -> NSRect { Self.frame(anchor: anchor()) }
 
     private func screen(containing r: NSRect) -> NSScreen? {
         NSScreen.screens.first { $0.frame.contains(NSPoint(x: r.midX, y: r.minY + Self.margin)) } ?? NSScreen.main
@@ -242,10 +217,9 @@ final class RecordingBar: NSObject {
         saveWork?.cancel()
         UserDefaults.standard.removeObject(forKey: Self.anchorKey)
         guard let p = panel else { return }
-        let size = state.expanded ? Self.expanded : Self.collapsed
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.3
-            p.animator().setFrame(Self.frame(size, anchor: Self.defaultAnchor()), display: true)
+            p.animator().setFrame(Self.frame(anchor: Self.defaultAnchor()), display: true)
         }
     }
 
@@ -253,16 +227,18 @@ final class RecordingBar: NSObject {
     @objc private func screensChanged() {
         guard let p = panel, wantVisible else { return }
         userDragAt = nil
-        p.setFrame(frame(for: state.expanded ? Self.expanded : Self.collapsed), display: true)
+        p.setFrame(frame(), display: true)
     }
 }
 
-/// Expanded/hover state shared by the controller (window size) and the view (layout).
+/// What the bar's SwiftUI tree observes instead of `AppModel`.
+/// WHY: `AppModel` publishes a change for every partial transcript event (several a second per
+/// lane, often with unchanged text), and a view observing it re-runs its body and the hosting
+/// view's update pass each time. These copies change only when the value does.
 final class RecordingBarState: ObservableObject {
-    enum Pin { case auto, expanded, collapsed }
-    @Published var expanded = false
-    @Published var hovering = false
-    var pin: Pin = .auto
+    @Published var captions = true
+    @Published var phase: AppModel.Phase = .idle
+    @Published var panelVisible = false
 }
 
 /// Never key, never main: clicking the bar must leave the call app frontmost and focused.
