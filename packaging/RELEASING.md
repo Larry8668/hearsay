@@ -3,6 +3,7 @@
 Same flow as sharemask. `main` is protected: changes land through a pull request (no review
 required), so do the version bump on a branch and merge it before tagging.
 
+0. The app icon is rendered by `packaging/make-icon.swift` (`swiftc -O -o /tmp/icon packaging/make-icon.swift && /tmp/icon <dir>` → `iconutil -c icns <dir>/AppIcon.iconset`); re-run it only if the icon changes.
 1. Bump `CFBundleShortVersionString` (and `CFBundleVersion`) in `Resources/Info.plist`.
 2. `make release` → `build/hearsay-<version>.zip` and its sha256.
 3. `gh release create v<version> build/hearsay-<version>.zip --title "hearsay <version>" --notes "..."`
