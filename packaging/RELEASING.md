@@ -1,8 +1,7 @@
 # Releasing
 
-While the repo is private: build and test locally with `make run`; no releases, no tap.
-
-Once public (same flow as sharemask):
+Same flow as sharemask. `main` is protected: changes land through a pull request (no review
+required), so do the version bump on a branch and merge it before tagging.
 
 1. Bump `CFBundleShortVersionString` (and `CFBundleVersion`) in `Resources/Info.plist`.
 2. `make release` → `build/hearsay-<version>.zip` and its sha256.
