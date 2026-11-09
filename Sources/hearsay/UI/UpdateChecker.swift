@@ -87,12 +87,9 @@ final class UpdateChecker {
         # Written by hearsay to update itself via Homebrew. Safe to delete.
         export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
         echo "Updating hearsay with Homebrew…"
-        AGENT="$HOME/Library/LaunchAgents/\(KeepAlive.label).plist"
-        # App lock's keep-alive agent would relaunch the old version mid-upgrade: unload it first.
-        [ -f "$AGENT" ] && launchctl bootout gui/$(id -u)/\(KeepAlive.label) 2>/dev/null
         pkill -x hearsay 2>/dev/null; sleep 1
         \(UpdateChecker.brewCommand)
-        if [ -f "$AGENT" ]; then launchctl bootstrap gui/$(id -u) "$AGENT"; else open -a hearsay; fi
+        open -a hearsay
         echo "\\nDone — hearsay relaunched. You can close this window."
         """
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("update-hearsay.command")
