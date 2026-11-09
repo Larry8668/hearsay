@@ -24,7 +24,11 @@ struct AudioChunk: Sendable {
 }
 
 /// A live audio producer. `start()` returns a stream that ends when `stop()` is called or the
-/// device goes away. Chunks are delivered in order with no gaps; a typical chunk is 50–200 ms.
+/// device goes away. Chunks are delivered in order; a typical chunk is 50–200 ms. Chunks are
+/// contiguous while audio flows, but `startTime` may JUMP forward: the system tap delivers
+/// nothing while no app plays sound, and device switches lose a moment. Sources do not pad
+/// those gaps with silence; engines must therefore derive timestamps from each chunk's
+/// `startTime`, never from a running sample count alone.
 protocol AudioSource: AnyObject {
     var speaker: Speaker { get }
     /// Human-readable device / tap description for the UI ("MacBook Air Microphone", "System audio").
