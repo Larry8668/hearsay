@@ -7,8 +7,11 @@ enum Main {
 
     @MainActor static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
-        // CLI diagnostics (--audio-probe, --transcribe) are dispatched here by the integrator.
-        _ = args
+        // CLI diagnostics. These never become a UI app; run them through LaunchServices so TCC
+        // attributes the permission request to hearsay, not the terminal:
+        //   open -W -n --stdout out.txt build/hearsay.app --args --audio-probe system
+        if args.first == "--audio-probe" { exit(AudioProbe.run(arguments: Array(args.dropFirst()))) }
+        if args.first == "--transcribe" { exit(EngineProbe.run(arguments: Array(args.dropFirst()))) }
         Log.start(role: "app")
 
         // SIGTERM/SIGINT (pkill, the Homebrew update script, logout, Ctrl-C) → a normal quit, so the
