@@ -82,7 +82,7 @@ struct LiveTranscriptView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottom) {
-                if model.lines.isEmpty && model.partials.isEmpty { empty } else { transcript }
+                if model.lines.isEmpty && model.partials.isEmpty { LivePanelEmpty(model: model) } else { transcript }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()   // lines must not scroll up under the header in the transparent title bar
@@ -92,75 +92,19 @@ struct LiveTranscriptView: View {
         // The header lives in the transparent title bar, beside the window buttons: an overlay
         // that ignores the safe area, so the scroll view keeps its normal insets below the bar.
         .overlay(alignment: .top) {
-            header.frame(maxHeight: .infinity, alignment: .top).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+            LivePanelHeader(model: model).frame(maxHeight: .infinity, alignment: .top).ignoresSafeArea(edges: .top).allowsHitTesting(false)
         }
         .frame(minWidth: 360, minHeight: 220)
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-    }
-
-    // MARK: Header
-
-    /// "Live transcript · 12 min · 48 lines", in the title bar beside the close button.
-    private var header: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { ctx in
-            HStack(spacing: 6) {
-                if model.phase == .listening {
-                    Circle().fill(Color.red).frame(width: 6, height: 6)
-                } else if model.phase == .paused {
-                    Image(systemName: "pause.fill").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange)
-                }
-                Text(headerText(now: ctx.date))
-                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(.leading, 64)   // clear of the window buttons
-        .padding(.trailing, 12)
-        .frame(height: LivePanel.titlebarHeight)
-    }
-
-    private func headerText(now: Date) -> String {
-        var parts = ["Live transcript"]
-        if model.startedAt != nil {
-            parts.append("\(Int(model.listeningTime(now: now) / 60)) min")
-            parts.append("\(model.lines.count) line\(model.lines.count == 1 ? "" : "s")")
-        }
-        if model.phase == .paused { parts.append("paused") }
-        return parts.joined(separator: " · ")
-    }
-
-    // MARK: Empty state
-
-    private var empty: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "waveform")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(.tertiary)
-                .symbolEffect(.variableColor.iterative, isActive: model.phase == .listening)
-            Text(emptyText).font(.system(size: 13.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            if model.phase == .idle {
-                Button("Start listening") { model.actions.toggleListening() }.controlSize(.regular)
-            }
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var emptyText: String {
-        switch model.phase {
-        case .listening: return "Listening… say something, or play audio."
-        case .starting: return "Getting ready…"
-        case .paused: return "Paused. Press ⌃⌥P to resume."
-        case .stopping: return "Saving transcript…"
-        case .idle: return "Press ⌃⌥H to start listening."
-        }
     }
 
     // MARK: Transcript
 
     private var transcript: some View {
         GeometryReader { outer in
-            let compact = outer.size.width < 540
+            let compact = outer.size.width < 560
+            let textWidth = compact ? outer.size.width - 32
+                : min(rowMaxWidth, outer.size.width - 32) - Self.timeWidth - chipWidth - 20
             ScrollViewReader { proxy in
                 ScrollView {
                     // The sentinel lives OUTSIDE the lazy stack so it always exists and reports
@@ -172,7 +116,7 @@ struct LiveTranscriptView: View {
                             }
                         }
                         ForEach(Speaker.allCases, id: \.self) { s in
-                            if let p = model.partials[s] { partialRow(s, p, compact: compact).padding(.top, 8) }
+                            if let p = model.partials[s] { partialRow(s, p, compact: compact, textWidth: textWidth).padding(.top, 8) }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .background(GeometryReader { g in
@@ -241,37 +185,39 @@ struct LiveTranscriptView: View {
         return min(130, ceil(widest) + 16)
     }
 
-    /// Wide: `time │ chip │ text`. Narrow (a panel tucked beside the call): the time moves under
-    /// the chip, so the text keeps a readable measure instead of a 200 pt sliver.
-    private func gutter<C: View, T: View>(compact: Bool, @ViewBuilder chip: () -> C, @ViewBuilder time: () -> T) -> some View {
-        Group {
-            if compact {
-                VStack(alignment: .trailing, spacing: 3) { chip(); time() }
-                    .frame(width: max(chipWidth, 60), alignment: .trailing)   // room for "14:03:12"
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    time().frame(width: Self.timeWidth, alignment: .leading)
-                    chip().frame(width: chipWidth, alignment: .trailing)
-                }
+    /// Wide: `time │ chip │ text`. Narrow (under 560 pt, a panel tucked beside the call): chip
+    /// and time on one line above the text, which then gets the full width.
+    @ViewBuilder
+    private func layout<C: View, T: View, B: View>(compact: Bool, @ViewBuilder chip: () -> C,
+                                                   @ViewBuilder time: () -> T, @ViewBuilder text: () -> B) -> some View {
+        if compact {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) { chip(); time() }
+                text()
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                time().frame(width: Self.timeWidth, alignment: .leading)
+                chip().frame(width: chipWidth, alignment: .trailing)
+                text()
             }
         }
     }
 
     private func row(_ line: TranscriptLine, chip: Bool, compact: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            gutter(compact: compact) {
-                if chip {
-                    Chip(text: LaneColors.chipLabel(line.speaker, app: line.sourceApp), color: LaneColors.adaptive(line.speaker), size: 11)
-                } else if !compact {
-                    // Invisible stand-in keeps the column's width and the row's text baseline.
-                    Chip(text: "me", color: .clear, size: 11).hidden()
-                }
-            } time: {
-                Text(TranscriptFormatter().clock(line.start))
-                    .font(.system(size: compact ? 10.5 : 11, design: .monospaced))
-                    .foregroundStyle(chip ? .secondary : .tertiary)
-                    .lineLimit(1).fixedSize()
+        layout(compact: compact) {
+            if chip {
+                Chip(text: LaneColors.chipLabel(line.speaker, app: line.sourceApp), color: LaneColors.adaptive(line.speaker), size: 11)
+            } else if !compact {
+                // Invisible stand-in keeps the column's width and the row's text baseline.
+                Chip(text: "me", color: .clear, size: 11).hidden()
             }
+        } time: {
+            Text(TranscriptFormatter().clock(line.start))
+                .font(.system(size: compact ? 10.5 : 11, design: .monospaced))
+                .foregroundStyle(chip ? .secondary : .tertiary)
+                .lineLimit(1).fixedSize()
+        } text: {
             Text(line.text)
                 .font(textFont)
                 .lineSpacing(lineGap)
@@ -281,19 +227,31 @@ struct LiveTranscriptView: View {
         .padding(.top, chip && line.id != model.lines.first?.id ? 6 : 0)   // a little air between runs
     }
 
-    private func partialRow(_ s: Speaker, _ text: String, compact: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            gutter(compact: compact) {
-                Chip(text: LaneColors.chipLabel(s, app: s == .them ? lastThemApp : nil), color: LaneColors.adaptive(s), size: 11)
-            } time: {
-                TypingDots()
-            }
-            Text(text).font(textFont).italic()
+    /// Words in progress: the normal font, dimmed, and only the last ~3 lines of it, so a long
+    /// hypothesis that hasn't committed yet never fills the window.
+    private func partialRow(_ s: Speaker, _ text: String, compact: Bool, textWidth: CGFloat) -> some View {
+        layout(compact: compact) {
+            Chip(text: LaneColors.chipLabel(s, app: s == .them ? lastThemApp : nil), color: LaneColors.adaptive(s), size: 11)
+        } time: {
+            TypingDots()
+        } text: {
+            Text(Self.tail(text, lines: 3, width: textWidth, fontSize: model.fontSize))
+                .font(textFont)
                 .lineSpacing(lineGap)
                 .foregroundStyle(.primary.opacity(0.65))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The end of `s` that fits in about `lines` lines, cut at a word and led by "…".
+    /// Estimated from an average glyph width of half the point size; no text layout.
+    static func tail(_ s: String, lines: Int, width: CGFloat, fontSize: CGFloat) -> String {
+        let maxChars = max(20, Int(width / (fontSize * 0.5))) * lines
+        guard s.count > maxChars else { return s }
+        var t = s.suffix(maxChars - 2)
+        if let sp = t.firstIndex(of: " ") { t = t[t.index(after: sp)...] }
+        return "…" + t
     }
 
     private var lastThemApp: String? { model.lines.last(where: { $0.speaker == .them && $0.sourceApp != nil })?.sourceApp }

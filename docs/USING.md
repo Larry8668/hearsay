@@ -39,13 +39,29 @@ that is just a copy of what "them" said at the same moment.
 
 ## The recording bar
 
-While a session is listening or paused, a small dark capsule sits at the bottom centre of the
-screen, just above the Dock. It stays on top of everything, including a full-screen Zoom or Meet,
-and on every Space, and clicking it never takes focus away from your call.
+While a session is listening or paused, a dark bar sits at the bottom centre of the screen, just
+above the Dock: live captions on top, the controls underneath. It stays on top of everything,
+including a full-screen Zoom or Meet, and on every Space, and clicking it never takes focus away
+from your call.
 
 ```
-●  ▁▃▅▂▇▃▁▂▅▃  12:34    ⏸  ■  ≡  ˄
+┌──────────────────────────────────────────────────────────┐
+│ me           …so the deadline moves to Friday, which      │
+│              gives us the whole week for testing          │
+│ them · Zoom  sounds good, I'll send the notes over        │
+└──────────────────────────────────────────────────────────┘
+(●  ▁▃▅▂▇▃▁▂▅▃▁▂▅▃▁▂▅  12:34                 ⏸   ■   ≡   ˅ )
 ```
+
+**Captions.** One block per side that has spoken in the last 10 seconds, **me** first, then
+**them** (with the app's name). Each block shows the last two lines of what that side is saying,
+like subtitles: new words appear on the bottom line and older lines slide up and fade out at the
+top. Words still being transcribed are slightly dimmer and firm up when the sentence ends. A side
+that has been quiet for 10 seconds fades away; with nobody talking the card just says
+*Listening…*. The captions only ever show the latest lines; the full text is in the live
+transcript window (≡) and the transcript file.
+
+**Controls.**
 
 - **Dot**: red and gently pulsing while listening, amber when paused, grey while the speech model is
   still loading.
@@ -54,12 +70,11 @@ and on every Space, and clicking it never takes focus away from your call.
 - **Time**: how long you've been listening, not counting pauses. Shows *Paused* while paused.
 - **Buttons**: pause / resume, stop (finishes and saves the transcript), and show / hide the live
   transcript window. Hover a button for its name and shortcut.
-- **˄**: shows the latest words from each side above the controls (in italic while they're still
-  being transcribed). Hovering over the bar for a moment does the same; click ˄ to keep it open,
-  or click it again to keep it closed for the rest of the session.
+- **˅ / ˄**: hides or shows the captions, leaving just the controls. hearsay remembers your choice.
+  Nothing happens on hover: the bar never changes size unless you click this.
 
 Drag the bar anywhere; hearsay remembers the spot. Double-click its background to put it back at
-the bottom centre. Turn it off, or turn off expanding on hover, under **Settings**.
+the bottom centre. Turn the bar off completely under **Settings ▸ Show recording bar**.
 
 ## Pausing
 
@@ -101,16 +116,17 @@ later. A session in which nobody spoke leaves no file.
 | Copy transcript | The current or last session as plain text |
 | Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, show the recording bar, expand it on hover, echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, show the recording bar, echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now* |
 
 ## The live transcript window
 
 Each line has its time, a chip saying who spoke (**me** in blue, **them · Zoom** in orange, with the
-app's name when known) and the text. Consecutive lines from the same side show the chip once. Grey
-italic text at the bottom, with three pulsing dots, is what's being said right now; it firms up into
-a line when the sentence ends. The window scrolls along while you're at the bottom; scroll up to
+app's name when known) and the text. Consecutive lines from the same side show the chip once. Dimmer
+text at the bottom, with three pulsing dots, is what's being said right now (the last few lines of
+it); it firms up into a line when the sentence ends. In a narrow window the chip and time sit on
+their own line above the text. The window scrolls along while you're at the bottom; scroll up to
 reread and it stays put, with a **New lines** button to jump back down when more arrive.
 
 Along the bottom: **Copy all**, **Export SRT**, **Reveal in Finder**, smaller/larger text, and the pin

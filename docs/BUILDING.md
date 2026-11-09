@@ -40,7 +40,12 @@ terminal.
 - `HEARSAY_FAKE_DENY=me` (or `them`) makes the fake source fail with "permission denied".
 - `HEARSAY_SNAPSHOT_DIR=/tmp/hs` makes the app render its windows to PNGs and the menu to `menu.txt`
   every 2 s, without needing Screen Recording permission:
-  `open --env HEARSAY_SNAPSHOT_DIR=/tmp/hs build/hearsay.app`.
+  `open --env HEARSAY_SNAPSHOT_DIR=/tmp/hs build/hearsay.app`. `HEARSAY_SNAPSHOT_INTERVAL=0.1`
+  shortens the interval; `HEARSAY_SNAPSHOT_SEQ=1` keeps every frame (`name-0001.png`, …) and logs
+  each window's frame to `frames.txt`, for stepping through an animation.
+- `HEARSAY_UI_SCRIPT="panel@3,captions@10,pause@20"` runs those UI actions that many seconds after
+  launch (`panel`: toggle the live transcript, `captions`: the bar's captions chevron, `pause`), so
+  states that need a click can be snapshotted unattended.
 
 First launch: the welcome window asks for Microphone access; macOS asks for System Audio Recording
 the first time you start listening. If a grant doesn't take effect, use Troubleshooting ▸ Relaunch.

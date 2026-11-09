@@ -21,9 +21,6 @@ final class AppModel: ObservableObject {
     @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
     }
-    @Published var expandBarOnHover: Bool = UserDefaults.standard.object(forKey: AppModel.barHoverKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(expandBarOnHover, forKey: Self.barHoverKey) }
-    }
     /// Committed lines of the current (or last) session, sorted by start time.
     @Published var lines: [TranscriptLine] = []
     /// In-progress text per speaker; cleared when that speaker's final arrives.
@@ -52,7 +49,7 @@ final class AppModel: ObservableObject {
     var actions = Actions()
 
     static let fontKey = "panelFontSize", pinKey = "panelPinned"
-    static let barKey = "recordingBarShown", barHoverKey = "recordingBarExpandOnHover"
+    static let barKey = "recordingBarShown"
     static let fontRange: ClosedRange<Double> = 10...28
     static let fontChoices: [(Double, String)] = [(12, "Small"), (14.5, "Medium"), (17, "Large"), (21, "Extra large")]
     private static var storedFontSize: Double {

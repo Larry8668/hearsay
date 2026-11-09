@@ -22,7 +22,13 @@ enum DebugSnapshot {
         timer = t
     }
 
+    private static let sequence = ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_SEQ"] == "1"
+    private static var count = 0
+    private static var frameLog = ""
+
     @MainActor private static func dump(to dir: URL, menu: String) {
+        count += 1
+        defer { if sequence { try? frameLog.write(to: dir.appendingPathComponent("frames.txt"), atomically: true, encoding: .utf8) } }
         try? menu.write(to: dir.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
         for w in NSApp.windows where w.isVisible {
             guard let view = (w.isOpaque ? w.contentView?.superview : nil) ?? w.contentView,
@@ -37,7 +43,10 @@ enum DebugSnapshot {
             }
             let name = (w.frameAutosaveName.isEmpty ? String(describing: type(of: w)) : w.frameAutosaveName)
                 .replacingOccurrences(of: "/", with: "-")
-            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + ".png"))
+            // HEARSAY_SNAPSHOT_SEQ=1 keeps every frame (name-0001.png …) to step through an animation.
+            let suffix = sequence ? String(format: "-%04d", count) : ""
+            if sequence { frameLog += "\(count) \(name) \(NSStringFromRect(w.frame))\n" }
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + suffix + ".png"))
         }
     }
 
@@ -69,6 +78,20 @@ enum DebugSnapshot {
         rep.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
         NSGraphicsContext.restoreGraphicsState()
         return out
+    }
+
+    /// Development aid: `HEARSAY_UI_SCRIPT="panel@5,captions@12,pause@20"` runs the named actions
+    /// that many seconds after launch, so UI states that need a click can be snapshotted unattended.
+    static func runScriptIfRequested(_ actions: [String: () -> Void]) {
+        guard let script = ProcessInfo.processInfo.environment["HEARSAY_UI_SCRIPT"] else { return }
+        for step in script.split(separator: ",") {
+            let parts = step.split(separator: "@")
+            guard parts.count == 2, let action = actions[String(parts[0])], let at = Double(parts[1]) else { continue }
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) {
+                Log.info("ui script: \(parts[0])")
+                action()
+            }
+        }
     }
 
     /// "✓ Me (microphone)", "  Start listening ⌃⌥H", "(disabled) Not listening", nested by indent.
