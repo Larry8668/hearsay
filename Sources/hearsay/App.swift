@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Model download/load starts now, in the background, so it's usually done by the time
         // the user first presses Start.
         session.prepareEngines()
+        // Dev aid / automation: HEARSAY_AUTOSTART=1 starts listening as soon as the models are ready
+        // (`open --env HEARSAY_AUTOSTART=1 build/hearsay.app`). Lets an end-to-end test run without
+        // anyone pressing the hotkey.
+        if ProcessInfo.processInfo.environment["HEARSAY_AUTOSTART"] == "1" { session.start() }
 
         // The status line shows elapsed minutes; .common so it also ticks while the menu is open.
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
