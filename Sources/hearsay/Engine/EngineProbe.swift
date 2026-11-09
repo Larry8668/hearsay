@@ -1,19 +1,21 @@
 import FluidAudio
 import Foundation
 
-/// `hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav]`
+/// `hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--no-split]`
 ///
 /// Runs the real engine on a 16 kHz mono WAV without the GUI and prints what the session layer
 /// would receive, plus speed and memory numbers. `--two` runs a second engine instance (speaker
-/// `them`) on another file at the same time, which is how me + them run in the app.
+/// `them`) on another file at the same time, which is how me + them run in the app. `--no-split`
+/// turns off the mid-speech line cuts (sentence / clause / length) to compare the text.
 /// This is the one place allowed to `print`: its output IS the product.
 enum EngineProbe {
     static func run(arguments: [String]) -> Int32 {
-        var files: [String] = [], variant: StreamingModelVariant?, realtime = false, passes = 1
+        var files: [String] = [], variant: StreamingModelVariant?, realtime = false, passes = 1, split = true
         var it = arguments.makeIterator()
         while let a = it.next() {
             switch a {
             case "--realtime": realtime = true
+            case "--no-split": split = false
             // Several sessions on the same engines: proves start-after-stop works without a reload.
             case "--passes": passes = max(1, Int(it.next() ?? "") ?? 1)
             case "--variant":
@@ -27,7 +29,7 @@ enum EngineProbe {
             }
         }
         guard !files.isEmpty else {
-            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N]")
+            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N] [--no-split]")
             return 2
         }
         var audio: [[Float]] = []
@@ -46,7 +48,7 @@ enum EngineProbe {
         let code = Box()
         Task.detached {
             code.value = await session(audio: audio, variant: variant ?? ParakeetEngine.configuredVariant(),
-                                       realtime: realtime, passes: passes)
+                                       realtime: realtime, passes: passes, split: split)
             sem.signal()
         }
         sem.wait()
@@ -55,8 +57,11 @@ enum EngineProbe {
 
     private final class Box: @unchecked Sendable { var value: Int32 = 0 }
 
-    private static func session(audio: [[Float]], variant: StreamingModelVariant, realtime: Bool, passes: Int) async -> Int32 {
-        let engines = audio.indices.map { _ in ParakeetEngine(variant: variant) }
+    private static func session(audio: [[Float]], variant: StreamingModelVariant, realtime: Bool, passes: Int,
+                                split: Bool) async -> Int32 {
+        var cfg = UtteranceTracker.Config()
+        if !split { cfg.sentenceAfter = .infinity; cfg.clauseAfter = .infinity; cfg.clauseWords = .max; cfg.maxUtterance = .infinity }
+        let engines = audio.indices.map { _ in ParakeetEngine(variant: variant, tracker: cfg) }
         print("variant: \(variant.rawValue) (\(variant.displayName))  models: \(ModelStore.directory(for: variant).path)")
         let downloaded = ModelStore.isDownloaded(variant)
         let tLoad = Date()

@@ -6,12 +6,17 @@ import Foundation
 ///     engine.start(speaker:) events       ──────────▶  handle(_:)       (main actor)
 ///
 /// `.partial` → AppModel only; `.final` → TranscriptStore (disk) + AppModel; `.warning` → log +
-/// status line. The feed task also measures each chunk's level for the recording bar's waveform.
+/// status line (see SessionController+Events.swift, which also runs the echo filter). The feed
+/// task also measures each chunk's level for the recording bar's waveform and the echo filter.
 ///
-/// Pause stops every lane exactly like Stop (sources off, engines flush their trailing text as
-/// finals) but keeps the store and the start time; Resume starts the lanes again into the same
-/// store. So while paused no audio is captured at all, which is the point of pausing. Engines are created and prepared once at launch and reused for every session;
-/// sources are created per start and dropped after stop.
+/// Pause does NOT touch the audio devices: (re)building the mic's voice-processing unit or the
+/// system tap reconfigures the output device, which makes other apps' audio stutter (see
+/// docs/PERFORMANCE.md, "Audio glitches"). Instead each lane's gate closes: chunks are discarded,
+/// the engines flush (trailing text becomes final lines) and the levels freeze. Resume restarts
+/// the engines (fresh utterance state, so audio from before the pause is never stitched to new
+/// speech) and reopens the gates. Start / stop do build and tear down the sources, both at once.
+/// Engines are created and prepared once at launch and reused for every session; sources are
+/// created per start and dropped after stop.
 ///
 /// Main actor; nothing here blocks it: preparation, starts and stops are async tasks.
 @MainActor
@@ -20,8 +25,9 @@ final class SessionController {
     /// Called after any state change the menu bar should reflect.
     var onChange: () -> Void = {}
 
-    private var engines: [Speaker: TranscriptionEngine] = [:]
-    private var lanes: [Speaker: Lane] = [:]
+    var engines: [Speaker: TranscriptionEngine] = [:]
+    /// Running lanes (see SessionController+Lanes.swift).
+    var lanes: [Speaker: Lane] = [:]
     private var prepareTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var stopTask: Task<Void, Never>?
@@ -30,22 +36,29 @@ final class SessionController {
     /// Start was requested before the model was ready; begin as soon as it is.
     private var startWhenReady = false
     /// Drops mic lines that are just the speakers heard by the mic (see EchoFilter).
-    private var echo = EchoFilter()
+    var echo = EchoFilter()
+    /// Per-lane chunk levels of the last minute, for the echo filter's level tie-break.
+    let levelHistory = LevelHistory()
     /// Every engine finished `prepare` (the model state can read .ready while the second is still loading).
     private var enginesReady = false
-    private var warningToken = 0
+    var warningToken = 0
     /// Current session's transcript, or the last one after stop (for Open / Copy).
     private(set) var store: TranscriptStore?
 
-    private final class Lane {
-        let source: AudioSource
-        var feed: Task<Void, Never>?
-        var events: Task<Void, Never>?
-        var stopping = false
-        init(source: AudioSource) { self.source = source }
+    init(model: AppModel) {
+        self.model = model
+        // Dev aid (like HEARSAY_AUTOSTART): with HEARSAY_AUTOMATION=1, end-to-end tests drive the
+        // session by posting the distributed notification "dev.hearsay.control" with object
+        // "toggle" (⌃⌥H) or "pause" (⌃⌥P); synthesized key events don't reach Carbon hotkeys.
+        guard ProcessInfo.processInfo.environment["HEARSAY_AUTOMATION"] == "1" else { return }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("dev.hearsay.control"), object: nil, queue: .main
+        ) { [weak self] note in
+            let what = note.object as? String
+            Log.info("automation: \(what ?? "?")")
+            MainActor.assumeIsolated { if what == "toggle" { self?.toggle() } else if what == "pause" { self?.togglePause() } }
+        }
     }
-
-    init(model: AppModel) { self.model = model }
 
     // MARK: Source preferences
 
@@ -143,8 +156,10 @@ final class SessionController {
         model.audio.run()
         onChange()
         Log.info("session: starting \(speakers.map(\.rawValue))")
+        echo = EchoFilter()
+        levelHistory.clear()
         startTask = Task {
-            for s in speakers { await startLane(s) }
+            await startLanes(speakers)
             startTask = nil
             if lanes.isEmpty {
                 Log.warn("session: no source could start")
@@ -183,8 +198,9 @@ final class SessionController {
         return stopTask
     }
 
-    /// Stops every lane (trailing finals still land in the store) but keeps the session: same
-    /// store, same start time. The pause is recorded in the store for the marker and header.
+    /// Keeps the session (same store, same start time) and the audio devices running; every
+    /// lane stops feeding its engine and the engines flush, so trailing finals still land in the
+    /// store. The pause is recorded in the store for the marker and header.
     func pause() {
         guard model.phase == .listening else { return }
         let now = Date()
@@ -197,14 +213,16 @@ final class SessionController {
         let previous = pauseTask
         pauseTask = Task {
             await previous?.value
-            for s in Array(lanes.keys) { await stopLane(s) }
+            for s in Array(lanes.keys) { await pauseLane(s) }
             model.partials = [:]
+            echo.resetMe()
             pauseTask = nil
             Log.info("session: paused")
         }
     }
 
-    /// Restarts the enabled lanes into the same store.
+    /// Reopens the lanes into the same store with fresh engine state. Sources enabled or disabled
+    /// while paused are started / stopped now.
     func resume() {
         guard model.phase == .paused else { return }
         let now = Date()
@@ -218,7 +236,9 @@ final class SessionController {
         let previous = pauseTask
         pauseTask = Task {
             await previous?.value
-            for s in Speaker.allCases where Self.isEnabled(s) { await startLane(s) }
+            for s in Speaker.allCases where !Self.isEnabled(s) { await stopLane(s) }
+            for s in Array(lanes.keys) { await resumeLane(s) }
+            await startLanes(Speaker.allCases.filter { Self.isEnabled($0) && lanes[$0] == nil })
             pauseTask = nil
             if lanes.isEmpty {
                 // Nothing could start (both sources off, permission revoked): end the session
@@ -248,110 +268,6 @@ final class SessionController {
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
             if !done { Log.warn("session: stop timed out after \(timeout) s; finalising anyway") }
             finish()
-        }
-    }
-
-    // MARK: Lanes
-
-    private func startLane(_ s: Speaker) async {
-        guard lanes[s] == nil, let engine = engines[s] else { return }
-        let source = Wiring.makeSource(s)
-        let lane = Lane(source: source)
-        lanes[s] = lane   // reserve the slot so a concurrent toggle doesn't double-start
-        let events: AsyncStream<EngineEvent>
-        do {
-            events = try await engine.start(speaker: s)
-        } catch {
-            Log.error("engine start (\(s.rawValue)) failed: \(error)")
-            showWarning(error.localizedDescription)
-            lanes[s] = nil
-            return
-        }
-        // Stopped (source toggled off) while the engine was starting: back out.
-        guard lanes[s] === lane, !lane.stopping else { await engine.stop(); return }
-        let chunks: AsyncStream<AudioChunk>
-        do {
-            chunks = try source.start()
-        } catch {
-            if case AudioSourceError.permissionDenied = error { model.permissionDenied.insert(s) }
-            Log.error("source \(s.rawValue) (\(source.displayName)) failed to start: \(error)")
-            showWarning(error.localizedDescription)
-            await engine.stop()
-            lanes[s] = nil
-            return
-        }
-        model.permissionDenied.remove(s)
-        Log.info("lane \(s.rawValue): \(source.displayName) → \(engine.identifier)")
-        lane.events = Task { [weak self] in
-            for await event in events { self?.handle(event) }
-        }
-        let meter = model.audio.meter
-        lane.feed = Task.detached(priority: .userInitiated) { [weak self] in
-            for await chunk in chunks {
-                meter.report(s, samples: chunk.samples)
-                await engine.feed(chunk)
-            }
-            await self?.sourceEnded(s, lane: lane)
-        }
-    }
-
-    private func stopLane(_ s: Speaker) async {
-        guard let lane = lanes[s], !lane.stopping else { return }
-        lane.stopping = true
-        lane.source.stop()
-        await lane.feed?.value            // every captured chunk has been fed
-        await engines[s]?.stop()          // flush: trailing final, then the event stream ends
-        await lane.events?.value          // …and every final has been stored
-        lanes[s] = nil
-        model.partials[s] = nil
-        Log.info("lane \(s.rawValue): stopped")
-    }
-
-    /// A source's stream ended on its own (device unplugged, tap destroyed).
-    private func sourceEnded(_ s: Speaker, lane: Lane) {
-        guard !lane.stopping, lanes[s] === lane else { return }
-        Log.warn("source \(s.rawValue) ended unexpectedly")
-        showWarning(s == .me ? "Microphone stopped." : "System audio stopped.")
-        Task { await stopLane(s); if lanes.isEmpty { stop() }; onChange() }
-    }
-
-    // MARK: Events
-
-    private func handle(_ event: EngineEvent) {
-        switch event {
-        case .partial(let text, let speaker):
-            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            model.partials[speaker] = t.isEmpty ? nil : t
-            // Partials carry no timestamps; a them-hypothesis is at most ~25 s old.
-            if speaker == .them, !t.isEmpty { echo.observeThem(text: t, start: Date().addingTimeInterval(-25), end: Date()) }
-        case .final(let line):
-            guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                model.partials[line.speaker] = nil; return
-            }
-            if line.speaker == .them {
-                echo.observeThem(text: line.text, start: line.start, end: line.end)
-            } else if echo.isEcho(text: line.text, start: line.start, end: line.end) {
-                Log.info("echo filter: dropped me-line that matches them: \"\(line.text.prefix(60))\"")
-                model.partials[.me] = nil
-                return
-            }
-            store?.insert(line)
-            model.insert(line)
-        case .warning(let message):
-            Log.warn("engine: \(message)")
-            showWarning(message)
-        }
-    }
-
-    func showWarning(_ message: String) {
-        model.warning = message
-        warningToken += 1
-        let token = warningToken
-        onChange()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            guard let self = self, self.warningToken == token else { return }
-            self.model.warning = nil
-            self.onChange()
         }
     }
 }

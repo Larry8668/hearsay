@@ -172,9 +172,9 @@ private struct Job: Sendable {
             var modelEnd = false
             if let eou = manager as? StreamingEouAsrManager { modelEnd = await eou.eouDetected }
             if let reason = tracker.finalReason(modelSignalledEnd: modelEnd) {
-                // Every reason except a mid-speech length cut happens in silence, so restarting the
-                // model there loses nothing and keeps its token buffer (and timestamps) bounded.
-                let reset = reason != .maxLength
+                // Silence-type reasons restart the model (nothing is lost, and its token buffer stays
+                // bounded); mid-speech cuts keep it running and leave the remainder pending.
+                let reset = !reason.isSplit
                 if let line = tracker.commit(reason: reason, speaker: speaker, engine: engine, modelWillReset: reset) {
                     out.yield(.final(line))
                 }
@@ -207,7 +207,8 @@ private struct Job: Sendable {
         }
         try? await manager.reset()
         out.finish()
-        Log.info("engine \(engine): stopped (\(speaker.rawValue))")
+        let revised = tracker.realignments > 0 ? ", \(tracker.realignments) committed-text revisions realigned" : ""
+        Log.info("engine \(engine): stopped (\(speaker.rawValue))\(revised)")
     }
 
     /// Feeds a little silence into a fresh (or just reset) model. Every variant dropped the first

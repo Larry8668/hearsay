@@ -12,10 +12,14 @@ final class LevelMeter: @unchecked Sendable {
     private var latest: [Speaker: (level: Float, at: TimeInterval)] = [:]
 
     /// One pass over the chunk (≤3200 floats at 16 kHz); cheap next to the engine's work.
-    func report(_ speaker: Speaker, samples: [Float]) {
-        let l = LevelMeter.level(rms: LevelMeter.rms(samples))
+    /// Returns the chunk's RMS so the caller can reuse it.
+    @discardableResult
+    func report(_ speaker: Speaker, samples: [Float]) -> Float {
+        let rms = LevelMeter.rms(samples)
+        let l = LevelMeter.level(rms: rms)
         let now = ProcessInfo.processInfo.systemUptime
         lock.lock(); latest[speaker] = (l, now); lock.unlock()
+        return rms
     }
 
     /// Latest level and when it was reported (system uptime), per lane that reported.
@@ -40,6 +44,36 @@ final class LevelMeter: @unchecked Sendable {
         let db = 20 * log10(rms)
         return min(1, max(0, (db + 60) / 50))
     }
+}
+
+/// Recent chunk levels per lane with their wall-clock times, so the echo filter can compare how
+/// loud each lane was while a line was spoken. Written by the feed tasks (one entry per chunk,
+/// ~10/s per lane), read on the main actor when a me-line is final. Keeps the last 60 s.
+final class LevelHistory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [Speaker: [(start: Date, end: Date, power: Float)]] = [:]
+
+    func record(_ speaker: Speaker, rms: Float, start: Date, end: Date) {
+        lock.lock(); defer { lock.unlock() }
+        var e = entries[speaker, default: []]
+        e.append((start, end, rms * rms))
+        if let first = e.first, end.timeIntervalSince(first.end) > 60 {
+            e.removeFirst(e.firstIndex { end.timeIntervalSince($0.end) <= 60 } ?? 0)
+        }
+        entries[speaker] = e
+    }
+
+    /// Mean level (dBFS) of `speaker`'s chunks overlapping `from…to`; nil when it has none. A lane
+    /// that delivered nothing (the system tap while no app plays) has no level, not −∞.
+    func level(_ speaker: Speaker, from: Date, to: Date) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        let hits = (entries[speaker] ?? []).filter { $0.end >= from && $0.start <= to }
+        guard !hits.isEmpty else { return nil }
+        let mean = Double(hits.reduce(Float(0)) { $0 + $1.power }) / Double(hits.count)
+        return mean > 0 ? 10 * log10(mean) : -120
+    }
+
+    func clear() { lock.lock(); entries = [:]; lock.unlock() }
 }
 
 /// Smoothed levels + a short history for the recording bar's waveform. Lives on AppModel but as

@@ -55,7 +55,7 @@ final class MicCapture: AudioSource {
     func stop() {
         queue.sync {
             guard continuation != nil || engine != nil else { return }
-            tearDownEngine()
+            tearDownEngine(park: true)
             if let l = outputListener {
                 var addr = CA.address(kAudioHardwarePropertyDefaultOutputDevice)
                 AudioObjectRemovePropertyListenerBlock(CA.system, &addr, queue, l)
@@ -77,23 +77,33 @@ final class MicCapture: AudioSource {
     // MARK: Engine lifecycle (on `queue`)
 
     private func buildEngine() throws {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        // Must happen BEFORE reading the format / installing the tap: enabling voice processing
-        // swaps the underlying AU (VoiceProcessingIO) and changes the input format.
         // Voice processing (echo cancellation + noise suppression) costs ~25% of a core on an M4,
         // so it runs only when it can do anything: when the output is a loudspeaker the mic hears.
         let useVPIO = EchoCancellation.shouldEnable()
         vpioActive = useVPIO
-        do {
-            if useVPIO { try input.setVoiceProcessingEnabled(true) }
-            else { Log.info("mic: voice processing off (\(EchoCancellation.current.rawValue); output \(CA.name(CA.defaultOutputDevice) ?? "?"))") }
-            // VPIO ducks *all other audio* by default (Zoom's own playback would drop ~15 dB
-            // while we record). Ask for the least ducking we can get.
-            input.voiceProcessingOtherAudioDuckingConfiguration =
-                AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
-        } catch {
-            Log.warn("mic: voice processing unavailable (\(error.localizedDescription)); capturing raw input without echo cancellation")
+        // The last session's stopped voice-processing engine, if still parked on these devices.
+        let reused = useVPIO ? VoiceProcessingPark.take(input: CA.defaultInputDevice) : nil
+        let engine = reused ?? AVAudioEngine()
+        let input = engine.inputNode
+        // Must happen BEFORE reading the format / installing the tap: enabling voice processing
+        // swaps the underlying AU (VoiceProcessingIO) and changes the input format.
+        // Enabling it reconfigures the output device (other apps' audio stops for ~2 × 0.5 s,
+        // see docs/PERFORMANCE.md "Audio glitches"); unavoidable, so it happens only at Start.
+        if reused != nil {
+            Log.info("mic: reusing the parked voice-processing engine")
+        } else if useVPIO {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                // VPIO ducks *all other audio* by default (Zoom's own playback would drop ~15 dB
+                // while we record). Ask for the least ducking we can get. (Setting this before
+                // enabling made no measurable difference to the output stalls.)
+                input.voiceProcessingOtherAudioDuckingConfiguration =
+                    AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            } catch {
+                Log.warn("mic: voice processing unavailable (\(error.localizedDescription)); capturing raw input without echo cancellation")
+            }
+        } else {
+            Log.info("mic: voice processing off (\(EchoCancellation.current.rawValue); output \(CA.name(CA.defaultOutputDevice) ?? "?"))")
         }
 
         // With voice processing on, a MacBook Air reports 5 or 7 channels at 48 kHz (it changes
@@ -156,12 +166,15 @@ final class MicCapture: AudioSource {
         }
     }
 
-    private func tearDownEngine() {
+    /// `park`: session end. A voice-processing engine is stopped but not released (releasing it
+    /// stutters other apps' audio); VoiceProcessingPark releases it once the output is idle.
+    private func tearDownEngine(park: Bool = false) {
         pendingChange?.cancel(); pendingChange = nil
         if let o = configObserver { NotificationCenter.default.removeObserver(o); configObserver = nil }
         guard let engine else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        if park, engine.inputNode.isVoiceProcessingEnabled { VoiceProcessingPark.park(engine, input: deviceID) }
         self.engine = nil
     }
 
