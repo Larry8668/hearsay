@@ -3,6 +3,8 @@ import AppKit
 @main
 enum Main {
     static func main() {
+        let args = Array(CommandLine.arguments.dropFirst())
+        if args.first == "--audio-probe" { exit(AudioProbe.run(arguments: Array(args.dropFirst()))) }
         Log.start(role: "app")
         let app = NSApplication.shared
         let delegate = AppDelegate()
