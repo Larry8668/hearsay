@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="112" alt="hearsay icon">
+</p>
+
 <h1 align="center">hearsay</h1>
 
 <p align="center">
