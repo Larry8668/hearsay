@@ -274,13 +274,33 @@ final class SystemAudioTap: AudioSource {
             guard running != 0 else { continue }
             let pid = (try? CA.get(obj, kAudioProcessPropertyPID, initial: pid_t(-1))) ?? -1
             guard pid != own else { continue }
-            var name = CA.string(obj, kAudioProcessPropertyBundleID) ?? ""
+            var name = ""
+            // Browsers and Electron apps play from a helper (Safari → com.apple.WebKit.GPU, Chrome →
+            // com.google.Chrome.helper). The "responsible" process is the app the user would name,
+            // and it is also the one TCC attributes the sound to.
+            if pid > 0, let owner = responsibleApp(for: pid) { name = owner }
+            if name.isEmpty { name = CA.string(obj, kAudioProcessPropertyBundleID) ?? "" }
             if name.isEmpty, pid > 0 {
                 name = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? executableName(pid) ?? ""
             }
             if !name.isEmpty, !result.contains(name) { result.append(name) }
         }
         return result
+    }
+
+    /// Bundle ID of the app responsible for `pid` (itself, or the parent app of a helper), via the
+    /// same libquarantine call TCC uses. Private but long-stable (10.14+); nil if unavailable, if
+    /// the responsible process is `pid` itself and has no bundle, or if it's launchd.
+    private typealias ResponsibleFn = @convention(c) (pid_t) -> pid_t
+    private static let responsibleFor: ResponsibleFn? = {
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else { return nil }
+        return unsafeBitCast(sym, to: ResponsibleFn.self)
+    }()
+    private static func responsibleApp(for pid: pid_t) -> String? {
+        guard let fn = responsibleFor else { return nil }
+        let owner = fn(pid)
+        guard owner > 1 else { return nil }
+        return NSRunningApplication(processIdentifier: owner)?.bundleIdentifier
     }
 
     private static func executableName(_ pid: pid_t) -> String? {
