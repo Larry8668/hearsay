@@ -12,3 +12,13 @@ struct TranscriptLine: Codable, Equatable, Sendable, Identifiable {
     /// Engine identifier that produced the line ("parakeet-eou-120m").
     var engine: String
 }
+
+/// A stretch of a session during which listening was paused (Pause / ⌃⌥P). `end` is nil while
+/// the pause is still going. Stored in the JSON sidecar and rendered as a marker line in Markdown.
+struct PauseInterval: Codable, Equatable, Sendable {
+    var start: Date
+    var end: Date?
+
+    /// Length up to `end`, or up to `now` while still open.
+    func length(now: Date) -> TimeInterval { max(0, (end ?? now).timeIntervalSince(start)) }
+}

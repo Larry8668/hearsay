@@ -65,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var welcome = WelcomeWindow(model: model)
     private let updates = UpdateChecker()
     private let hotkey = Hotkey.toggleListening
+    private let pauseHotkey = Hotkey.togglePause
+    private var bar: RecordingBar!
     private var menuBar: MenuBar!
     private var ticker: Timer?
     private var quitting = false
@@ -72,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     override init() { super.init(); AppDelegate.shared = self }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        menuBar = MenuBar(actions: menuActions(), hotkey: hotkey)
+        menuBar = MenuBar(actions: menuActions(), hotkey: hotkey, pauseHotkey: pauseHotkey)
         menuBar.onMenuWillOpen = { [weak self] in
             guard let self = self else { return }
             WelcomeWindow.refreshMic(self.model)
@@ -83,13 +85,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             copyAll: { [weak self] in self?.session.store?.copyAll() },
             requestMic: { [weak self] in if let m = self?.model { WelcomeWindow.requestMic(m) } },
             openTranscript: { [weak self] in self?.openTranscript() },
-            closeWelcome: { [weak self] in self?.welcome.close() })
+            closeWelcome: { [weak self] in self?.welcome.close() },
+            exportSRT: { [weak self] in self?.exportSRT() },
+            revealInFinder: { [weak self] in
+                if let store = self?.session.store { store.revealInFinder() } else { TranscriptStore.openFolder() }
+            })
+        bar = RecordingBar(model: model, actions: RecordingBar.Actions(
+            togglePause: { [weak self] in self?.session.togglePause() },
+            stop: { [weak self] in self?.session.stop() },
+            togglePanel: { [weak self] in self?.panel.toggle() }))
 
         session.onChange = { [weak self] in self?.refresh() }
         panel.onVisibilityChange = { [weak self] in self?.refresh() }
         hotkey.register { [weak self] in
             Log.info("hotkey \(Hotkey.toggleListening.display)")
             self?.session.toggle()
+        }
+        pauseHotkey.register { [weak self] in
+            Log.info("hotkey \(Hotkey.togglePause.display)")
+            self?.session.togglePause()
         }
         updates.onChange = { [weak self] in self?.refreshVersion() }
         updates.start()
@@ -132,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkey.unregister()
+        pauseHotkey.unregister()
         Log.info("quit")
     }
 
@@ -140,15 +155,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func menuActions() -> MenuBar.Actions {
         MenuBar.Actions(
             toggleListening: { [weak self] in self?.session.toggle() },
+            togglePause: { [weak self] in self?.session.togglePause() },
             togglePanel: { [weak self] in self?.panel.toggle() },
             openTranscript: { [weak self] in self?.openTranscript() },
             openFolder: { TranscriptStore.openFolder() },
-            exportSRT: { [weak self] in
-                if let url = self?.session.store?.exportSRT() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-            },
+            exportSRT: { [weak self] in self?.exportSRT() },
             copyAll: { [weak self] in self?.session.store?.copyAll() },
             toggleSource: { [weak self] s in self?.session.setEnabled(s, !SessionController.isEnabled(s)) },
             toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
+            toggleRecordingBar: { [weak self] in self?.model.showRecordingBar.toggle(); self?.refresh() },
+            toggleBarHover: { [weak self] in
+                self?.model.expandBarOnHover.toggle()
+                self?.bar.updateExpanded()
+                self?.refresh()
+            },
             setFontSize: { [weak self] size in self?.model.fontSize = size; self?.refresh() },
             showWelcome: { [weak self] in self?.welcome.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
@@ -171,13 +191,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let failed: Bool
         if case .failed = model.modelState { failed = true } else { failed = false }
         var s = MenuBar.State()
-        s.icon = model.isListening ? .listening : (failed || !model.permissionDenied.isEmpty ? .error : .idle)
+        s.icon = model.phase == .paused ? .paused
+            : model.isListening ? .listening : (failed || !model.permissionDenied.isEmpty ? .error : .idle)
         s.status = model.statusLine()
         s.warning = model.warning
         s.permissionDenied = model.permissionDenied
-        s.listening = model.isListening
+        s.listening = model.isActive
+        s.paused = model.phase == .paused
+        s.canPause = model.phase == .listening
+        s.showBar = model.showRecordingBar
+        s.barHover = model.expandBarOnHover
         s.busy = model.phase == .starting || model.phase == .stopping
         s.panelVisible = panel.isVisible
+        if model.panelVisible != s.panelVisible { model.panelVisible = s.panelVisible }
+        // The bar follows the session: up while listening/paused (and while the model loads for
+        // a requested start), down as soon as Stop is pressed.
+        bar?.setVisible(model.isActive && model.showRecordingBar)
         s.hasTranscript = !(session.store?.lines.isEmpty ?? true)
         s.sources = Dictionary(uniqueKeysWithValues: Speaker.allCases.map { ($0, SessionController.isEnabled($0)) })
         s.launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -190,6 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshVersion() {
         menuBar?.updateVersion(current: UpdateChecker.currentVersion, status: updates.status,
                                checksEnabled: updates.enabled, homebrew: UpdateChecker.installedWithHomebrew)
+    }
+
+    private func exportSRT() {
+        if let url = session.store?.exportSRT() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     private func openTranscript() {

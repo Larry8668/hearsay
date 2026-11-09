@@ -3,10 +3,11 @@ import AppKit
 /// NSStatusItem + menu. Pure view: everything it does goes through `actions`, everything it shows
 /// comes in through `update(_:)`.
 final class MenuBar: NSObject, NSMenuDelegate {
-    enum IconState { case idle, listening, error }
+    enum IconState { case idle, listening, paused, error }
 
     struct Actions {
         var toggleListening: () -> Void
+        var togglePause: () -> Void
         var togglePanel: () -> Void
         var openTranscript: () -> Void
         var openFolder: () -> Void
@@ -14,6 +15,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var copyAll: () -> Void
         var toggleSource: (Speaker) -> Void
         var toggleLoginItem: () -> Void
+        var toggleRecordingBar: () -> Void
+        var toggleBarHover: () -> Void
         var setFontSize: (Double) -> Void
         var showWelcome: () -> Void
         var openLogs: () -> Void
@@ -33,7 +36,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var status = "Not listening"
         var warning: String?
         var permissionDenied: Set<Speaker> = []
-        var listening = false
+        var listening = false         // a session exists (listening, starting or paused)
+        var paused = false
+        var canPause = false
+        var showBar = true
+        var barHover = true
         var busy = false              // starting / stopping
         var panelVisible = false
         var hasTranscript = false
@@ -47,12 +54,16 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let actions: Actions
     private let hotkey: Hotkey
+    private let pauseHotkey: Hotkey
 
     private let statusLine = NSMenuItem()
     private let warningLine = NSMenuItem()
     private let micPermissionItem = NSMenuItem()
     private let tapPermissionItem = NSMenuItem()
     private let startStopItem = NSMenuItem()
+    private let pauseItem = NSMenuItem()
+    private let barItem = NSMenuItem()
+    private let barHoverItem = NSMenuItem()
     private let panelItem = NSMenuItem()
     private let openItem = NSMenuItem()
     private let srtItem = NSMenuItem()
@@ -67,9 +78,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
     var onMenuWillOpen: (() -> Void)?
     var menuDescription: String { DebugSnapshot.describe(menu) }
 
-    init(actions: Actions, hotkey: Hotkey) {
+    init(actions: Actions, hotkey: Hotkey, pauseHotkey: Hotkey) {
         self.actions = actions
         self.hotkey = hotkey
+        self.pauseHotkey = pauseHotkey
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         build()
@@ -78,7 +90,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     /// Top level = essentials only:
     ///   status · warning · permission fixes
-    ///   Start/Stop listening · Show live transcript
+    ///   Start/Stop listening · Pause/Resume · Show live transcript
     ///   Open transcript · Open transcripts folder · More ▸ (SRT, copy)
     ///   Sources ▸  Settings ▸  Troubleshooting ▸
     ///   version/update ▸ · Quit
@@ -103,6 +115,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         startStopItem.keyEquivalent = hotkey.display.last.map { String($0).lowercased() } ?? ""
         startStopItem.keyEquivalentModifierMask = hotkey.menuModifiers
         menu.addItem(startStopItem)
+        pauseItem.title = "Pause"
+        bind(pauseItem, #selector(togglePause))
+        pauseItem.keyEquivalent = pauseHotkey.display.last.map { String($0).lowercased() } ?? ""
+        pauseItem.keyEquivalentModifierMask = pauseHotkey.menuModifiers
+        menu.addItem(pauseItem)
         panelItem.title = "Show live transcript"
         bind(panelItem, #selector(togglePanel))
         menu.addItem(panelItem)
@@ -140,11 +157,17 @@ final class MenuBar: NSObject, NSMenuDelegate {
         updateChecksItem.title = "Check for updates daily"
         bind(updateChecksItem, #selector(toggleUpdateChecks))
         settings.addItem(updateChecksItem)
+        barItem.title = "Show recording bar"
+        bind(barItem, #selector(toggleRecordingBar))
+        settings.addItem(barItem)
+        barHoverItem.title = "Expand recording bar on hover"
+        bind(barHoverItem, #selector(toggleBarHover))
+        settings.addItem(barHoverItem)
         fontItem.title = "Live panel font size"
         let fonts = NSMenu()
         for (size, name) in AppModel.fontChoices {
             let mi = item(name, #selector(chooseFont(_:)))
-            mi.tag = Int(size)
+            mi.tag = Int(size * 10)   // tags are Int; sizes like 14.5 need the extra digit
             fonts.addItem(mi)
         }
         fontItem.submenu = fonts
@@ -193,6 +216,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         switch state {
         case .idle: (symbol, color, tip) = ("waveform", nil, "hearsay: not listening")
         case .listening: (symbol, color, tip) = ("waveform.badge.mic", .systemRed, "hearsay: listening")
+        case .paused: (symbol, color, tip) = ("pause.circle", .systemOrange, "hearsay: paused")
         case .error: (symbol, color, tip) = ("exclamationmark.triangle", .systemYellow, "hearsay: needs attention")
         }
         var img = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
@@ -218,13 +242,19 @@ final class MenuBar: NSObject, NSMenuDelegate {
         tapPermissionItem.isHidden = !s.permissionDenied.contains(.them)
         startStopItem.title = s.listening ? "Stop listening" : "Start listening"
         startStopItem.isEnabled = !s.busy || s.listening
+        pauseItem.title = s.paused ? "Resume" : "Pause"
+        pauseItem.isHidden = !s.listening
+        pauseItem.isEnabled = s.canPause || s.paused
+        barItem.state = s.showBar ? .on : .off
+        barHoverItem.state = s.barHover ? .on : .off
+        barHoverItem.isEnabled = s.showBar
         panelItem.state = s.panelVisible ? .on : .off
         copyItem.isEnabled = s.hasTranscript
         srtItem.isEnabled = s.hasTranscript
         meItem.state = s.sources[.me] == true ? .on : .off
         themItem.state = s.sources[.them] == true ? .on : .off
         loginItem.state = s.launchAtLogin ? .on : .off
-        for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) == s.fontSize ? .on : .off }
+        for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) / 10 == s.fontSize ? .on : .off }
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
     }
 
@@ -255,7 +285,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
     // MARK: Actions
 
     @objc private func toggleListening() { actions.toggleListening() }
+    @objc private func togglePause() { actions.togglePause() }
     @objc private func togglePanel() { actions.togglePanel() }
+    @objc private func toggleRecordingBar() { actions.toggleRecordingBar() }
+    @objc private func toggleBarHover() { actions.toggleBarHover() }
     @objc private func openTranscript() { actions.openTranscript() }
     @objc private func openFolder() { actions.openFolder() }
     @objc private func exportSRT() { actions.exportSRT() }
@@ -263,7 +296,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func toggleMe() { actions.toggleSource(.me) }
     @objc private func toggleThem() { actions.toggleSource(.them) }
     @objc private func toggleLoginItem() { actions.toggleLoginItem() }
-    @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag)) }
+    @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag) / 10) }
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func openMicSettings() { actions.openSettings(.me) }

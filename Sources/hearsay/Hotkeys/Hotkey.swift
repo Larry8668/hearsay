@@ -1,12 +1,14 @@
 import Carbon
 import AppKit
 
-/// One global hotkey via Carbon `RegisterEventHotKey`: works whichever app is frontmost and needs
+/// A global hotkey via Carbon `RegisterEventHotKey`: works whichever app is frontmost and needs
 /// no Accessibility permission (unlike an NSEvent global monitor). Same approach as sharemask's
-/// Hotkeys, trimmed to the single shortcut hearsay has.
+/// Hotkeys, trimmed to the two shortcuts hearsay has.
 final class Hotkey {
     /// ⌃⌥H — Control-Option is rarely taken by call apps, and H for "hear".
     static let toggleListening = Hotkey(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey), display: "⌃⌥H")
+    /// ⌃⌥P — pause / resume, same modifier family.
+    static let togglePause = Hotkey(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(controlKey | optionKey), display: "⌃⌥P")
 
     let keyCode: UInt32
     let modifiers: UInt32

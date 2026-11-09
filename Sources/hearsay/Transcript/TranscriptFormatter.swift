@@ -23,27 +23,52 @@ struct TranscriptFormatter {
     /// _Apps heard: Zoom, Safari · Engine: parakeet-eou-120m · Made with hearsay, on this Mac._
     ///
     /// **14:03:12 me** So the deadline moves to Friday?
+    ///
+    /// _— paused 4 min —_
     /// ```
-    /// `end == nil` means the call is still going ("14:03 – in progress").
-    func markdown(lines: [TranscriptLine], start: Date, end: Date?, engine: String) -> String {
-        var out = "# Call transcript — \(headerRange(start: start, end: end))\n"
+    /// `end == nil` means the call is still going ("14:03 – in progress"). Each pause becomes a
+    /// marker line placed where it happened, so a reader knows the gap in the text is deliberate.
+    func markdown(lines: [TranscriptLine], start: Date, end: Date?, engine: String, pauses: [PauseInterval] = []) -> String {
+        var out = "# Call transcript — \(headerRange(start: start, end: end, pauses: pauses))\n"
         var meta: [String] = []
         let apps = appsHeard(lines)
         if !apps.isEmpty { meta.append("Apps heard: " + apps.joined(separator: ", ")) }
         meta.append("Engine: \(engine)")
         meta.append("Made with hearsay, on this Mac.")
         out += "_" + meta.joined(separator: " · ") + "_\n"
+        var pending = pauses.sorted { $0.start < $1.start }[...]
         for line in lines {
+            // A pause goes before the first line that started after it began. Engines flush their
+            // trailing text when a pause begins, so those finals (start < pause) stay above it.
+            while let p = pending.first, p.start <= line.start { out += pauseMarker(p); pending.removeFirst() }
             // One paragraph per line: renders cleanly everywhere and diffs line by line.
             out += "\n**\(format(line.start, "HH:mm:ss")) \(label(line))** \(escape(line.text))\n"
         }
+        for p in pending { out += pauseMarker(p) }
         return out
     }
 
-    func headerRange(start: Date, end: Date?) -> String {
+    /// "_— paused 4 min —_", or "_— paused —_" while the pause is still going.
+    func pauseMarker(_ p: PauseInterval) -> String {
+        guard let end = p.end else { return "\n_— paused —_\n" }
+        return "\n_— paused \(TranscriptFormatter.shortDuration(end.timeIntervalSince(p.start))) —_\n"
+    }
+
+    /// "Mon 9 Nov 2026, 14:03–14:41 (38 min)", or "(38 min, 4 min paused)" when there were pauses.
+    /// The first figure is wall-clock time, matching the range shown next to it.
+    func headerRange(start: Date, end: Date?, pauses: [PauseInterval] = []) -> String {
         let day = format(start, "EEE d MMM yyyy")
         guard let end = end else { return "\(day), \(format(start, "HH:mm")) – in progress" }
-        return "\(day), \(format(start, "HH:mm"))–\(format(end, "HH:mm")) (\(TranscriptFormatter.duration(end.timeIntervalSince(start))))"
+        var length = TranscriptFormatter.duration(end.timeIntervalSince(start))
+        let paused = pauses.reduce(0) { $0 + $1.length(now: end) }
+        if paused >= 0.5 { length += ", \(TranscriptFormatter.shortDuration(paused)) paused" }
+        return "\(day), \(format(start, "HH:mm"))–\(format(end, "HH:mm")) (\(length))"
+    }
+
+    /// Like `duration`, but seconds under a minute ("40 s"): a pause is often brief, and
+    /// "paused under 1 min" reads oddly.
+    static func shortDuration(_ seconds: TimeInterval) -> String {
+        seconds < 59.5 ? "\(Int(seconds.rounded())) s" : duration(seconds)
     }
 
     /// "under 1 min", "38 min", "1 h 05 min".

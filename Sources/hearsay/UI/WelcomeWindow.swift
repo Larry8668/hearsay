@@ -99,13 +99,13 @@ struct WelcomeView: View {
             HStack {
                 Text("Toggle any time with ⌃⌥H or from the menu-bar waveform.").font(.callout).foregroundStyle(.secondary)
                 Spacer()
-                Button(model.isListening ? "Listening" : "Start listening") {
+                Button(model.isActive ? "Listening" : "Start listening") {
                     model.actions.closeWelcome()
-                    if !model.isListening { model.actions.toggleListening() }
+                    if !model.isActive { model.actions.toggleListening() }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(model.isListening)
+                .disabled(model.isActive)
             }
         }
         .padding(26)

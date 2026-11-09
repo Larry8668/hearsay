@@ -13,6 +13,8 @@ final class LivePanel: NSObject, NSWindowDelegate {
     init(model: AppModel) { self.model = model }
 
     var isVisible: Bool { panel?.isVisible ?? false }
+    /// Title-bar height of a utility panel; the SwiftUI header fills exactly that strip.
+    static var titlebarHeight: CGFloat = 19
 
     func toggle() { isVisible ? hide() : show() }
 
@@ -25,17 +27,23 @@ final class LivePanel: NSObject, NSWindowDelegate {
 
     func hide() { panel?.orderOut(nil); onVisibilityChange?() }
 
-    func setTitle(_ title: String) { panel?.title = title }
+    /// Hidden in the title bar, but still what Mission Control and accessibility report.
+    func setTitle(_ title: String) { if panel?.title != title { panel?.title = title } }
 
     private func make() -> NSPanel {
-        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 360),
-                        styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                        styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel, .fullSizeContentView],
                         backing: .buffered, defer: false)
         p.title = "hearsay"
+        // Content runs under a transparent title bar; the SwiftUI header sits beside the close button.
+        p.titleVisibility = .hidden
+        p.titlebarAppearsTransparent = true
+        p.isMovableByWindowBackground = true
         p.isReleasedWhenClosed = false
         p.hidesOnDeactivate = false        // accessory apps are "inactive" almost always
         p.becomesKeyOnlyIfNeeded = true
-        p.minSize = NSSize(width: 280, height: 160)
+        p.minSize = NSSize(width: 360, height: 220)
+        LivePanel.titlebarHeight = p.frame.height - p.contentLayoutRect.height
         p.contentView = NSHostingView(rootView: LiveTranscriptView(model: model))
         p.delegate = self
         // Restore the user's last frame; first time, park it in the top-right corner.
@@ -64,51 +72,116 @@ final class LivePanel: NSObject, NSWindowDelegate {
 struct LiveTranscriptView: View {
     @ObservedObject var model: AppModel
     @State private var atBottom = true
-    @State private var viewportHeight: CGFloat = 0
+    @State private var newLines = false
 
-    static let meColor = Color(nsColor: .systemBlue)
-    static let themColor = Color(nsColor: .systemOrange)
+    /// Same speaker within this many seconds continues a "paragraph": the chip is shown once.
+    static let groupGap: TimeInterval = 20
+    private static let timeWidth: CGFloat = 56, maxText: CGFloat = 640
+    private var rowMaxWidth: CGFloat { Self.timeWidth + chipWidth + Self.maxText + 20 }
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.lines.isEmpty && model.partials.isEmpty { empty } else { transcript }
+            ZStack(alignment: .bottom) {
+                if model.lines.isEmpty && model.partials.isEmpty { empty } else { transcript }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()   // lines must not scroll up under the header in the transparent title bar
             Divider()
             footer
         }
-        .frame(minWidth: 280, minHeight: 160)
+        // The header lives in the transparent title bar, beside the window buttons: an overlay
+        // that ignores the safe area, so the scroll view keeps its normal insets below the bar.
+        .overlay(alignment: .top) {
+            header.frame(maxHeight: .infinity, alignment: .top).ignoresSafeArea(edges: .top).allowsHitTesting(false)
+        }
+        .frame(minWidth: 360, minHeight: 220)
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
     }
 
-    private var empty: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "waveform").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text(model.isListening ? "Listening… lines appear here as people speak." : "Not listening.")
-                .foregroundStyle(.secondary)
-            if !model.isListening {
-                Button("Start listening  ⌃⌥H") { model.actions.toggleListening() }
+    // MARK: Header
+
+    /// "Live transcript · 12 min · 48 lines", in the title bar beside the close button.
+    private var header: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { ctx in
+            HStack(spacing: 6) {
+                if model.phase == .listening {
+                    Circle().fill(Color.red).frame(width: 6, height: 6)
+                } else if model.phase == .paused {
+                    Image(systemName: "pause.fill").font(.system(size: 8, weight: .bold)).foregroundStyle(.orange)
+                }
+                Text(headerText(now: ctx.date))
+                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
             }
         }
+        .padding(.leading, 64)   // clear of the window buttons
+        .padding(.trailing, 12)
+        .frame(height: LivePanel.titlebarHeight)
+    }
+
+    private func headerText(now: Date) -> String {
+        var parts = ["Live transcript"]
+        if model.startedAt != nil {
+            parts.append("\(Int(model.listeningTime(now: now) / 60)) min")
+            parts.append("\(model.lines.count) line\(model.lines.count == 1 ? "" : "s")")
+        }
+        if model.phase == .paused { parts.append("paused") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: Empty state
+
+    private var empty: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.tertiary)
+                .symbolEffect(.variableColor.iterative, isActive: model.phase == .listening)
+            Text(emptyText).font(.system(size: 13.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            if model.phase == .idle {
+                Button("Start listening") { model.actions.toggleListening() }.controlSize(.regular)
+            }
+        }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var emptyText: String {
+        switch model.phase {
+        case .listening: return "Listening… say something, or play audio."
+        case .starting: return "Getting ready…"
+        case .paused: return "Paused. Press ⌃⌥P to resume."
+        case .stopping: return "Saving transcript…"
+        case .idle: return "Press ⌃⌥H to start listening."
+        }
+    }
+
+    // MARK: Transcript
+
     private var transcript: some View {
         GeometryReader { outer in
+            let compact = outer.size.width < 540
             ScrollViewReader { proxy in
                 ScrollView {
                     // The sentinel lives OUTSIDE the lazy stack so it always exists and reports
                     // its position; inside, it wouldn't be instantiated while off-screen.
                     VStack(alignment: .leading, spacing: 0) {
-                        LazyVStack(alignment: .leading, spacing: model.fontSize * 0.5) {
-                            ForEach(model.lines) { line in row(line) }
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(model.lines.enumerated()), id: \.element.id) { i, line in
+                                row(line, chip: startsGroup(i), compact: compact)
+                            }
                         }
                         ForEach(Speaker.allCases, id: \.self) { s in
-                            if let p = model.partials[s] { partialRow(s, p).padding(.top, model.fontSize * 0.5) }
+                            if let p = model.partials[s] { partialRow(s, p, compact: compact).padding(.top, 8) }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                             .background(GeometryReader { g in
                                 Color.clear.preference(key: BottomKey.self, value: g.frame(in: .named("scroll")).maxY)
                             })
                     }
-                    .padding(12)
+                    .frame(maxWidth: rowMaxWidth)
+                    .frame(maxWidth: .infinity)          // centred when the window is wide
+                    .padding(16)
                     .textSelection(.enabled)
                 }
                 .coordinateSpace(name: "scroll")
@@ -117,65 +190,150 @@ struct LiveTranscriptView: View {
                     // "At bottom" = the end is visible (with a little slack). Scrolling up to
                     // reread pauses auto-scroll; scrolling back down resumes it.
                     atBottom = maxY <= outer.size.height + 40
+                    if atBottom { newLines = false }
                 }
-                .onChange(of: model.lines.count) { follow(proxy) }
-                .onChange(of: model.partials) { follow(proxy) }
+                .onChange(of: model.lines.count) { follow(proxy, newLine: true) }
+                .onChange(of: model.partials) { follow(proxy, newLine: false) }
                 .onAppear { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom); atBottom = true } }
+                .overlay(alignment: .bottom) {
+                    if newLines {
+                        Button { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("bottom", anchor: .bottom) }; newLines = false } label: {
+                            Label("New lines", systemImage: "arrow.down")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .padding(.horizontal, 11).padding(.vertical, 5)
+                                .foregroundStyle(.white)
+                                .background(Capsule().fill(Color.accentColor))
+                                .shadow(color: .black.opacity(0.2), radius: 4, y: 1)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeOut(duration: 0.2), value: newLines)
             }
         }
     }
 
-    private func follow(_ proxy: ScrollViewProxy) {
-        guard atBottom else { return }
+    private func follow(_ proxy: ScrollViewProxy, newLine: Bool) {
+        guard atBottom else { if newLine { newLines = true }; return }
         proxy.scrollTo("bottom", anchor: .bottom)
     }
 
-    private var labelWidth: CGFloat { model.fontSize * 4.2 }
-
-    private func row(_ line: TranscriptLine) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            label(line.speaker, app: line.sourceApp)
-            Text(line.text).font(.system(size: model.fontSize)).frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .help(TranscriptFormatter().clock(line.start))
+    /// The chip shows on the first line of a run: new speaker, different app, or a 20 s gap.
+    private func startsGroup(_ i: Int) -> Bool {
+        guard i > 0 else { return true }
+        let a = model.lines[i - 1], b = model.lines[i]
+        return a.speaker != b.speaker || a.sourceApp != b.sourceApp || b.start.timeIntervalSince(a.start) > Self.groupGap
     }
 
-    private func partialRow(_ s: Speaker, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            label(s, app: nil).opacity(0.6)
-            Text(text).font(.system(size: model.fontSize)).italic().foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+    private var textFont: Font { .system(size: model.fontSize) }
+    /// 1.3 × the font size, measured line to line (SF's natural leading is ≈1.2).
+    private var lineGap: CGFloat { model.fontSize * 0.1 }
+
+    /// Width of the chip column: the widest label this session actually uses, so a transcript
+    /// with only "me" / "them" doesn't reserve room for "them · Microsoft Teams".
+    private var chipWidth: CGFloat {
+        var labels = Set(["them"])
+        for case let app? in Set(model.lines.map(\.sourceApp)) { labels.insert(LaneColors.chipLabel(.them, app: app)) }
+        let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let widest = labels.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 30
+        return min(130, ceil(widest) + 16)
     }
 
-    private func label(_ s: Speaker, app: String?) -> some View {
-        VStack(alignment: .trailing, spacing: 0) {
-            Text(s.rawValue).font(.system(size: model.fontSize, weight: .semibold))
-                .foregroundStyle(s == .me ? Self.meColor : Self.themColor)
-            if let app = app {
-                Text(AppNames.name(for: app)).font(.system(size: model.fontSize * 0.75)).foregroundStyle(.secondary).lineLimit(1)
+    /// Wide: `time │ chip │ text`. Narrow (a panel tucked beside the call): the time moves under
+    /// the chip, so the text keeps a readable measure instead of a 200 pt sliver.
+    private func gutter<C: View, T: View>(compact: Bool, @ViewBuilder chip: () -> C, @ViewBuilder time: () -> T) -> some View {
+        Group {
+            if compact {
+                VStack(alignment: .trailing, spacing: 3) { chip(); time() }
+                    .frame(width: max(chipWidth, 60), alignment: .trailing)   // room for "14:03:12"
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    time().frame(width: Self.timeWidth, alignment: .leading)
+                    chip().frame(width: chipWidth, alignment: .trailing)
+                }
             }
         }
-        .frame(width: labelWidth, alignment: .trailing)
     }
+
+    private func row(_ line: TranscriptLine, chip: Bool, compact: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            gutter(compact: compact) {
+                if chip {
+                    Chip(text: LaneColors.chipLabel(line.speaker, app: line.sourceApp), color: LaneColors.adaptive(line.speaker), size: 11)
+                } else if !compact {
+                    // Invisible stand-in keeps the column's width and the row's text baseline.
+                    Chip(text: "me", color: .clear, size: 11).hidden()
+                }
+            } time: {
+                Text(TranscriptFormatter().clock(line.start))
+                    .font(.system(size: compact ? 10.5 : 11, design: .monospaced))
+                    .foregroundStyle(chip ? .secondary : .tertiary)
+                    .lineLimit(1).fixedSize()
+            }
+            Text(line.text)
+                .font(textFont)
+                .lineSpacing(lineGap)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, chip && line.id != model.lines.first?.id ? 6 : 0)   // a little air between runs
+    }
+
+    private func partialRow(_ s: Speaker, _ text: String, compact: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            gutter(compact: compact) {
+                Chip(text: LaneColors.chipLabel(s, app: s == .them ? lastThemApp : nil), color: LaneColors.adaptive(s), size: 11)
+            } time: {
+                TypingDots()
+            }
+            Text(text).font(textFont).italic()
+                .lineSpacing(lineGap)
+                .foregroundStyle(.primary.opacity(0.65))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var lastThemApp: String? { model.lines.last(where: { $0.speaker == .them && $0.sourceApp != nil })?.sourceApp }
+
+    // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 10) {
-            Button { model.actions.toggleListening() } label: {
-                Image(systemName: model.isListening ? "stop.circle.fill" : "record.circle")
-                    .foregroundStyle(model.isListening ? Color.red : Color.primary)
+        HStack(spacing: 14) {
+            Button { model.actions.copyAll() } label: { Label("Copy all", systemImage: "doc.on.doc") }
+                .disabled(model.lines.isEmpty).opacity(model.lines.isEmpty ? 0.45 : 1).help("Copy the transcript as plain text")
+            Button { model.actions.exportSRT() } label: { Label("Export SRT", systemImage: "captions.bubble") }
+                .disabled(model.lines.isEmpty).opacity(model.lines.isEmpty ? 0.45 : 1).help("Write subtitles next to the transcript and show them in Finder")
+            Button { model.actions.revealInFinder() } label: { Label("Reveal in Finder", systemImage: "folder") }
+                .help("Show the transcript file in Finder")
+            Spacer(minLength: 8)
+            HStack(spacing: 2) {
+                Button { model.bumpFont(-1) } label: { Text("A").font(.system(size: 10.5, weight: .medium)).frame(width: 20) }
+                    .help("Smaller text")
+                Button { model.bumpFont(1) } label: { Text("A").font(.system(size: 14, weight: .medium)).frame(width: 20) }
+                    .help("Larger text")
             }
-            .help(model.isListening ? "Stop listening (⌃⌥H)" : "Start listening (⌃⌥H)")
-            Button("Copy all") { model.actions.copyAll() }.disabled(model.lines.isEmpty)
-            Spacer()
-            Button { model.bumpFont(-1) } label: { Image(systemName: "textformat.size.smaller") }.help("Smaller text")
-            Button { model.bumpFont(1) } label: { Image(systemName: "textformat.size.larger") }.help("Larger text")
-            Toggle(isOn: $model.pinned) { Image(systemName: model.pinned ? "pin.fill" : "pin") }
-                .toggleStyle(.button).help("Keep above all windows")
+            Button { model.pinned.toggle() } label: {
+                Image(systemName: model.pinned ? "pin.fill" : "pin")
+                    .foregroundStyle(model.pinned ? Color.accentColor : Color.secondary)
+                    .frame(width: 18)
+            }
+            .help(model.pinned ? "Pinned above other windows" : "Keep above other windows")
         }
+        .labelStyle(FooterLabelStyle())
+        .font(.system(size: 12))
         .buttonStyle(.borderless)
-        .controlSize(.small)
-        .padding(.horizontal, 12).padding(.vertical, 7)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+}
+
+/// Icon + label, 12 pt, tight spacing.
+private struct FooterLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.icon.font(.system(size: 11)); configuration.title }
     }
 }
 
