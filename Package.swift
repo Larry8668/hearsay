@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "hearsay",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.2")],
     dependencies: [
         // On-device ASR (NVIDIA Parakeet via CoreML on the Neural Engine). Apache-2.0.
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.18.0"),
