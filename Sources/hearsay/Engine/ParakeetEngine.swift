@@ -1,0 +1,230 @@
+import AVFoundation
+import FluidAudio
+import Foundation
+import os
+
+/// Live English speech-to-text on the Neural Engine via FluidAudio's cache-aware streaming models.
+///
+/// One instance per speaker. `feed` only enqueues (an `AsyncStream` yield, lock-free for the
+/// caller); a single worker task owns the FluidAudio manager and the `UtteranceTracker`, so all
+/// model calls and line bookkeeping run serially off the audio thread.
+///
+/// Default variant: see `defaultVariant` for the measurements behind the choice. Override without a
+/// rebuild: `defaults write dev.hearsay.app engineVariant nemotron-1120ms` (any
+/// `StreamingModelVariant` raw value except the offline Unified batch mode).
+final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
+    /// Parakeet Unified 0.6B, 640 ms tier (0.56 s chunk + 0.08 s look-ahead).
+    ///
+    /// Measured on the M4 MacBook Air (release build, three macOS-TTS clips, 66 s, ~160 words;
+    /// RTF = compute time / audio time for one stream; footprint = peak phys_footprint):
+    ///
+    ///   variant          word errors        RTF    footprint  download
+    ///   eou-160ms        ~13, no punct      0.086   47 MB     214 MB
+    ///   eou-320ms        ~6,  no punct      0.028   46 MB     214 MB
+    ///   nemotron-560ms   2,   partial punct 0.050   91 MB     597 MB
+    ///   nemotron-1120ms  2,   partial punct 0.057   91 MB     598 MB
+    ///   unified-320ms    1,   punct + ITN   0.164   53 MB     ~590 MB
+    ///   unified-640ms    2,   punct + ITN   0.045   53 MB     ~580 MB
+    ///   unified-1120ms   0,   punct + ITN   0.044   54 MB     ~590 MB
+    ///
+    /// EOU is fast and small but lowercase, unpunctuated and noticeably less accurate. Unified gives
+    /// transcript-ready text ("15%", "No? Great.") at Nemotron-level accuracy with ~40 MB less memory
+    /// per stream. Its 320 ms tier re-encodes the window 3.5x as often (RTF 0.16 per stream, too much
+    /// for two always-on streams); 640 ms costs the same as 1120 ms but shows words ~0.5 s sooner.
+    /// Live (paced) on a 50 s clip: first partial 0.85 s after audio start, finals 1.1 s after the
+    /// speaker stops (= the silence gap). Me + them together: 64–67 MB peak footprint, RTF 0.037.
+    /// (All variants dropped the first word until `prime()` existed; numbers above are with it.)
+    static let defaultVariant: StreamingModelVariant = .parakeetUnified640ms
+
+    /// The variant from `UserDefaults["engineVariant"]`, falling back to `defaultVariant`.
+    static func configuredVariant(_ defaults: UserDefaults = .standard) -> StreamingModelVariant {
+        guard let raw = defaults.string(forKey: "engineVariant") else { return defaultVariant }
+        guard let v = StreamingModelVariant(rawValue: raw), v != .parakeetUnifiedOffline15s else {
+            Log.warn("engine: unknown or non-streaming engineVariant '\(raw)', using \(defaultVariant.rawValue)")
+            return defaultVariant
+        }
+        return v
+    }
+
+    /// Output lag of each variant: chunk (+ right context for Unified). Feeds the silence rule.
+    static func latency(of v: StreamingModelVariant) -> TimeInterval {
+        if let c = v.eouChunkSize { return Double(c.durationMs) / 1000 }
+        if let c = v.nemotronChunkSize { return Double(c.rawValue) / 1000 }
+        if let c = v.unifiedConfig { return Double(c.latencyMs) / 1000 }
+        return 2
+    }
+
+    let variant: StreamingModelVariant
+    private let trackerConfig: UtteranceTracker.Config
+    /// Partials are coalesced to at most one per this interval (UI repaint budget).
+    private let partialInterval: Duration = .milliseconds(200)
+
+    var identifier: String { variant.rawValue }
+    var displayName: String { variant.displayName }
+    /// Every `StreamingModelVariant` (EOU, Nemotron streaming, Unified) is an English-only checkpoint.
+    var languages: [String] { ["en"] }
+
+    private struct State: @unchecked Sendable {
+        var manager: (any StreamingAsrManager)?
+        var inbox: AsyncStream<AudioChunk>.Continuation?
+        var worker: Task<Void, Never>?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    /// Samples fed but not yet consumed by the worker; used to warn when inference falls behind.
+    private let backlog = OSAllocatedUnfairLock(initialState: 0)
+
+    init(variant: StreamingModelVariant? = nil, tracker: UtteranceTracker.Config = .init()) {
+        let v = variant ?? Self.configuredVariant()
+        self.variant = v
+        var cfg = tracker
+        cfg.modelLatency = Self.latency(of: v)
+        self.trackerConfig = cfg
+    }
+
+    func prepare(progress: @escaping @Sendable (ModelState) -> Void) async throws {
+        if state.withLock({ $0.manager }) != nil { progress(.ready); return }
+        do {
+            try await ModelStore.shared.ensureDownloaded(variant, progress: progress)
+            let m = try await ModelStore.shared.makeManager(variant)
+            state.withLock { $0.manager = m }
+            progress(.ready)
+        } catch {
+            Log.error("engine \(identifier): prepare failed: \(error.localizedDescription)")
+            progress(.failed(error.localizedDescription))
+            throw error
+        }
+    }
+
+    func start(speaker: Speaker) async throws -> AsyncStream<EngineEvent> {
+        await stop()  // a second start without stop must not leave an orphaned worker
+        guard let manager = state.withLock({ $0.manager }) else { throw EngineError.notPrepared }
+        let (events, out) = AsyncStream.makeStream(of: EngineEvent.self, bufferingPolicy: .unbounded)
+        let (inbox, input) = AsyncStream.makeStream(of: AudioChunk.self, bufferingPolicy: .unbounded)
+        backlog.withLock { $0 = 0 }
+        let job = Job(manager: manager, speaker: speaker, engine: identifier, config: trackerConfig,
+                      partialInterval: partialInterval, backlog: backlog, out: out)
+        let worker = Task.detached(priority: .userInitiated) { await job.run(inbox) }
+        state.withLock { $0.inbox = input; $0.worker = worker }
+        Log.info("engine \(identifier): started for \(speaker.rawValue)")
+        return events
+    }
+
+    func feed(_ chunk: AudioChunk) async {
+        guard let inbox = state.withLock({ $0.inbox }) else { return }
+        backlog.withLock { $0 += chunk.samples.count }
+        inbox.yield(chunk)
+    }
+
+    func stop() async {
+        let (inbox, worker) = state.withLock { s -> (AsyncStream<AudioChunk>.Continuation?, Task<Void, Never>?) in
+            defer { s.inbox = nil; s.worker = nil }
+            return (s.inbox, s.worker)
+        }
+        inbox?.finish()
+        await worker?.value
+    }
+}
+
+/// One listening session: drains the inbox through the model and turns transcripts into events.
+private struct Job: Sendable {
+    let manager: any StreamingAsrManager
+    let speaker: Speaker
+    let engine: String
+    let config: UtteranceTracker.Config
+    let partialInterval: Duration
+    let backlog: OSAllocatedUnfairLock<Int>
+    let out: AsyncStream<EngineEvent>.Continuation
+
+    private static let format = AVAudioFormat(standardFormatWithSampleRate: AudioChunk.sampleRate, channels: 1)!
+
+    func run(_ inbox: AsyncStream<AudioChunk>) async {
+        var tracker = UtteranceTracker(config: config)
+        let clock = ContinuousClock()
+        var lastPartialAt = clock.now - partialInterval
+        var lastPartialText = ""
+        var behind = false
+        var errors = 0
+        await prime()
+
+        for await chunk in inbox where !chunk.samples.isEmpty {
+            let queued = backlog.withLock { $0 -= chunk.samples.count; return $0 }
+            let queuedSec = Double(queued) / AudioChunk.sampleRate
+            if queuedSec > 8, !behind {
+                behind = true
+                out.yield(.warning("Transcription is running \(Int(queuedSec)) s behind the audio."))
+                Log.warn("engine \(engine): backlog \(String(format: "%.1f", queuedSec)) s")
+            } else if queuedSec < 2 { behind = false }
+
+            tracker.ingest(chunk)
+            do {
+                try await manager.appendAudio(Self.buffer(chunk.samples))
+                try await manager.processBufferedAudio()
+            } catch {
+                errors += 1
+                if errors == 1 || errors % 100 == 0 {
+                    Log.error("engine \(engine): inference error #\(errors): \(error.localizedDescription)")
+                    out.yield(.warning(EngineError.inference(error.localizedDescription).localizedDescription))
+                }
+                continue
+            }
+            tracker.update(transcript: await manager.getPartialTranscript())
+
+            var modelEnd = false
+            if let eou = manager as? StreamingEouAsrManager { modelEnd = await eou.eouDetected }
+            if let reason = tracker.finalReason(modelSignalledEnd: modelEnd) {
+                // Every reason except a mid-speech length cut happens in silence, so restarting the
+                // model there loses nothing and keeps its token buffer (and timestamps) bounded.
+                let reset = reason != .maxLength
+                if let line = tracker.commit(reason: reason, speaker: speaker, engine: engine, modelWillReset: reset) {
+                    out.yield(.final(line))
+                }
+                if reset { try? await manager.reset(); await prime() }
+                lastPartialText = ""
+                continue
+            }
+
+            let pending = tracker.pending
+            if pending != lastPartialText, clock.now - lastPartialAt >= partialInterval {
+                out.yield(.partial(text: pending, speaker: speaker))
+                lastPartialText = pending
+                lastPartialAt = clock.now
+            }
+        }
+
+        // Inbox finished (stop): flush the model's buffered audio and commit whatever is left.
+        do {
+            // The models emit a word only once they have seen audio past it (chunk + look-ahead);
+            // without trailing silence the last word of a session gets clipped ("privacy cop").
+            let pad = Int((config.modelLatency + 0.5) * AudioChunk.sampleRate)
+            try await manager.appendAudio(Self.buffer([Float](repeating: 0, count: pad)))
+            try await manager.processBufferedAudio()
+            tracker.update(transcript: try await manager.finish())
+            if let line = tracker.commit(reason: .flush, speaker: speaker, engine: engine, modelWillReset: true) {
+                out.yield(.final(line))
+            }
+        } catch {
+            Log.error("engine \(engine): flush failed: \(error.localizedDescription)")
+        }
+        try? await manager.reset()
+        out.finish()
+        Log.info("engine \(engine): stopped (\(speaker.rawValue))")
+    }
+
+    /// Feeds a little silence into a fresh (or just reset) model. Every variant dropped the first
+    /// word ("The quarterly…" → "Quarterly…") when speech started on the very first sample; a
+    /// short lead-in gives the encoder context. Not seen by the tracker, so timing is unaffected.
+    private func prime() async {
+        try? await manager.appendAudio(Self.buffer([Float](repeating: 0, count: Int(0.3 * AudioChunk.sampleRate))))
+    }
+
+    /// Wraps samples in the 16 kHz mono Float32 buffer FluidAudio's `appendAudio` expects
+    /// (its converter passes this format through without resampling).
+    static func buffer(_ samples: [Float]) -> AVAudioPCMBuffer {
+        let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(max(samples.count, 1)))!
+        buf.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            buf.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
+        }
+        return buf
+    }
+}
