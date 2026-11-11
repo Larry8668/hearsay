@@ -16,6 +16,7 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     /// What the content pane asks of the window (Delete needs the library and the selection).
     struct ContentActions {
         var delete: (TranscriptLibrary.Entry) -> Void
+        var deleteMany: ([TranscriptLibrary.Entry]) -> Void
     }
 
     let state: MainWindowState
@@ -34,9 +35,9 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         self.model = model
         self.library = library
         self.currentFile = currentFile
-        state = MainWindowState(library: library, model: model)
+        state = MainWindowState(library: library, model: model, currentFile: currentFile)
         super.init()
-        state.$selection.removeDuplicates().sink { [weak self] _ in
+        state.$picked.removeDuplicates().sink { [weak self] _ in
             self?.updateTitle()
             self?.onVisibilityChange?()
         }.store(in: &subs)
@@ -84,7 +85,7 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         side.maximumThickness = 320
         side.canCollapse = true
         split.addSplitViewItem(side)
-        let actions = ContentActions(delete: { [weak self] in self?.delete($0) })
+        let actions = ContentActions(delete: { [weak self] in self?.delete($0) }, deleteMany: { [weak self] in self?.deleteMany($0) })
         let content = NSHostingController(rootView: MainContentView(state: state, library: library, model: model, actions: actions))
         split.addSplitViewItem(NSSplitViewItem(viewController: content))
         self.split = split
@@ -114,6 +115,7 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     /// Mission Control, the Window menu and accessibility see the title; the title bar hides it.
     private func updateTitle(_ w: NSWindow? = nil) {
         guard let w = w ?? window else { return }
+        if state.isBulk { w.title = "\(state.picked.count) transcripts — hearsay"; return }
         switch state.selection {
         case .live: w.title = (model.liveMeta.title ?? "Live transcript") + " — hearsay"
         case .transcript:
@@ -200,6 +202,12 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if state.isBulk {
+            let mi = NSMenuItem(title: "Move \(state.picked.count) Transcripts to Trash…", action: #selector(askDelete), keyEquivalent: "")
+            mi.target = self
+            menu.addItem(mi)
+            return
+        }
         let past = state.selectedEntry != nil
         let add = { (title: String, sel: Selector, key: String) -> NSMenuItem in
             let mi = NSMenuItem(title: title, action: sel, keyEquivalent: key)
@@ -239,20 +247,24 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
 
     /// Copy (toolbar) and "Copy as text": "[14:03:12] me: …" per line.
     @objc private func copyTranscript() {
+        guard !state.isBulk else { return }
         if state.selectedEntry != nil, let e = shownExport() { TranscriptStore.copy(e.formatter.plainText(lines: e.lines)) }
         else { model.actions.copyAll(model.hiddenVoices) }
     }
 
     @objc private func copyMarkdown() {
+        guard !state.isBulk else { return }
         if let e = shownExport() { TranscriptStore.copy(e.render(.markdown)) }
     }
 
     /// Export… (⋯ menu, File ▸ Export…, ⌘E): the save panel with the format popup.
     @objc func exportTranscript() {
+        guard !state.isBulk else { return }
         if let e = shownExport() { ExportPanel.run(e, in: window) }
     }
 
     @objc private func exportSRT() {
+        guard !state.isBulk else { return }
         if let doc = state.document {
             let hidden = state.hidden(for: doc.entry.jsonURL)
             if let url = TranscriptStore.writeSRT(lines: doc.lines.visible(hiding: hidden), start: doc.entry.startedAt, nextTo: doc.entry.markdownURL) {
@@ -264,25 +276,38 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     }
 
     @objc private func revealInFinder() {
+        guard !state.isBulk else { return }
         if let e = state.selectedEntry { NSWorkspace.shared.activateFileViewerSelecting([e.markdownURL]) } else { model.actions.revealInFinder() }
     }
 
     @objc private func openTranscript() {
+        guard !state.isBulk else { return }
         if let e = state.selectedEntry { NSWorkspace.shared.open(e.markdownURL) } else { model.actions.openTranscript() }
     }
 
-    @objc private func askDelete() { if state.selectedEntry != nil { state.confirmingDelete = true } }
+    @objc private func askDelete() { if state.isBulk || state.selectedEntry != nil { state.confirmingDelete = true } }
 
     private func delete(_ entry: TranscriptLibrary.Entry) {
         state.confirmingDelete = false
-        library.delete(entry)
+        library.delete(entry, except: currentFile())
         state.selection = .live     // the watcher would do this a moment later; don't show a trashed file meanwhile
+    }
+
+    /// Bulk delete (one Undo-able Finder operation), then the row after the last deleted one in
+    /// the sidebar as it stands (search included), else Live.
+    private func deleteMany(_ entries: [TranscriptLibrary.Entry]) {
+        state.confirmingDelete = false
+        let gone = Set(entries.map(\.jsonURL))
+        let order = state.visibleEntries
+        let next = order.lastIndex { gone.contains($0.jsonURL) }.flatMap { i in order[(i + 1)...].first { !gone.contains($0.jsonURL) } }
+        library.delete(entries, except: currentFile())
+        state.pick([next.map { .transcript($0.jsonURL) } ?? .live])
     }
 
     // MARK: Dev aids (HEARSAY_UI_SCRIPT)
 
     /// `window`: open · `past`: select the newest saved transcript · `hideme`: toggle the "me"
-    /// chip · `delete`: show the Trash confirm · `dark` / `light`: force the appearance ·
+    /// chip · `delete`: show the Trash confirm · `selectall`: pick every listed transcript · `bulkdelete`: trash the picked ones (no confirm) · `dark` / `light`: force the appearance ·
     /// `small` / `large`: 700×480 / 1200×800 · `title=…`: set the shown transcript's title ·
     /// `tags=a;b`: set its tags · `edittitle` / `addtag` / `rename`: open those inline editors
     /// (rename: the first voice chip) · `name=…`: name the first voice · `search=…`: filter the
@@ -324,6 +349,14 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
                 else if self.model.hiddenVoices.contains(.me) { self.model.hiddenVoices.remove(.me) } else { self.model.hiddenVoices.insert(.me) }
             },
             "delete": { [weak self] in self?.askDelete() },
+            "selectall": { [weak self] in
+                guard let self = self else { return }
+                self.state.pick(Set(self.state.visibleEntries.map { MainSelection.transcript($0.jsonURL) }))
+            },
+            "bulkdelete": { [weak self] in
+                guard let self = self, self.state.isBulk else { return }
+                self.deleteMany(self.state.bulkEntries)
+            },
             "dark": { [weak self] in self?.window?.appearance = NSAppearance(named: .darkAqua) },
             "light": { [weak self] in self?.window?.appearance = NSAppearance(named: .aqua) },
             "small": { [weak self] in self?.window?.setContentSize(NSSize(width: 700, height: 480)) },

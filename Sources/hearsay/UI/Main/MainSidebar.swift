@@ -14,8 +14,15 @@ enum MainSelection: Hashable {
 @MainActor
 final class MainWindowState: ObservableObject {
     @Published var selection: MainSelection = .live {
-        didSet { if selection != oldValue { load() } }
+        didSet {
+            if picked != [selection] { picked = [selection] }
+            if selection != oldValue { load() }
+        }
     }
+    /// What the sidebar highlights. One row is `selection`; two or more are a bulk selection
+    /// (transcripts only: Live never joins one) and `selection` keeps its last single value.
+    /// Changed through `pick`, which keeps the two in step.
+    @Published private(set) var picked: Set<MainSelection> = [.live]
     @Published private(set) var document: TranscriptLibrary.Document?
     @Published var hiddenPast: [URL: Set<Voice>] = [:]
     /// The inline "Move to Trash?" row is showing for the selected transcript.
@@ -23,7 +30,9 @@ final class MainWindowState: ObservableObject {
     /// The header's open inline editor (title, tag field, a chip's rename), if any.
     @Published var editing: MetaEditing?
     /// The sidebar's search text, already debounced (`SidebarSearchField`).
-    @Published var query = ""
+    @Published var query = "" {
+        didSet { if query != oldValue { dropHiddenPicks() } }
+    }
     /// Settings ▸ Your name, de-duplicated from `AppModel` like `phase`.
     @Published private(set) var yourName: String?
     /// De-duplicated copies of the two `AppModel` values the toolbar and a saved transcript need:
@@ -31,10 +40,13 @@ final class MainWindowState: ObservableObject {
     @Published private(set) var phase: AppModel.Phase = .idle
     @Published private(set) var fontSize: Double = 14.5
     let library: TranscriptLibrary
+    /// The live session's own file: listed as "Live", and never trashed from here.
+    private let currentFile: () -> URL?
     private var subs: Set<AnyCancellable> = []
 
-    init(library: TranscriptLibrary, model: AppModel) {
+    init(library: TranscriptLibrary, model: AppModel, currentFile: @escaping () -> URL? = { nil }) {
         self.library = library
+        self.currentFile = currentFile
         phase = model.phase
         fontSize = model.fontSize
         yourName = model.yourName
@@ -44,15 +56,67 @@ final class MainWindowState: ObservableObject {
         // The shown transcript trashed (here or in Finder): fall back to Live. Changed on disk
         // (its summary differs): read it again.
         library.$entries.dropFirst().sink { [weak self] entries in
-            guard let self = self, case .transcript(let url) = self.selection else { return }
+            guard let self = self else { return }
+            // Trashed rows (here or in Finder) leave a bulk selection too.
+            let urls = Set(entries.map(\.jsonURL))
+            let gone = self.picked.filter { if case .transcript(let u) = $0 { return !urls.contains(u) } else { return false } }
+            if !gone.isEmpty { let rest = self.picked.subtracting(gone); self.pick(rest.isEmpty ? [.live] : rest) }
+            guard case .transcript(let url) = self.selection else { return }
             guard let entry = entries.first(where: { $0.jsonURL == url }) else { self.selection = .live; return }
             if entry != self.document?.entry { self.load() }
         }.store(in: &subs)
     }
 
+    /// Two or more transcripts highlighted: the content pane shows a summary, not a transcript.
+    var isBulk: Bool { picked.count > 1 }
+
+    /// The shown saved transcript; nil for Live and for a bulk selection.
     var selectedEntry: TranscriptLibrary.Entry? {
-        guard case .transcript(let url) = selection else { return nil }
+        guard !isBulk, case .transcript(let url) = selection else { return nil }
         return library.entries.first { $0.jsonURL == url }
+    }
+
+    /// The highlighted transcripts of a bulk selection, newest first.
+    var bulkEntries: [TranscriptLibrary.Entry] {
+        guard isBulk else { return [] }
+        return library.entries.filter { picked.contains(.transcript($0.jsonURL)) }
+    }
+
+    /// The past transcripts the sidebar lists now (not the live file, matching the search),
+    /// newest first.
+    var visibleEntries: [TranscriptLibrary.Entry] {
+        let live = currentFile()
+        return library.entries.filter { $0.jsonURL != live && $0.matches(query) }
+    }
+
+    /// The List's selection came back changed. Live never stays in a multi-selection (⌘A and
+    /// ⇧-click sweep it in); an empty set is refused like a click on nothing always was.
+    func pick(_ new: Set<MainSelection>) {
+        var s = new
+        if s.count > 1 { s.remove(.live) }
+        if s.isEmpty { s = [selection] }
+        guard s != picked else { return }
+        picked = s
+        confirmingDelete = false
+        if s.count == 1, let only = s.first { selection = only }
+    }
+
+    /// Typing in the search must not leave rows selected that the list no longer shows: a bulk
+    /// delete would take them too.
+    private func dropHiddenPicks() {
+        guard isBulk else { return }
+        let shown = Set(visibleEntries.map { MainSelection.transcript($0.jsonURL) })
+        let kept = picked.intersection(shown)
+        if kept != picked { pick(kept.isEmpty ? [selection] : kept) }
+    }
+
+    /// Delete key and the sidebar's context menu: the inline confirm for these rows (the clicked
+    /// row, or the whole selection when it was in it).
+    func askDelete(_ items: Set<MainSelection>) {
+        let rows = items.filter { if case .transcript = $0 { return true } else { return false } }
+        guard !rows.isEmpty else { return }
+        pick(rows)
+        confirmingDelete = true
     }
 
     /// Title / tags / names for the shown saved transcript: the view changes now, the files on
@@ -93,10 +157,10 @@ struct MainSidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             SidebarSearchField(query: $state.query)
-            List(selection: Binding(get: { Optional(state.selection) }, set: { if let s = $0 { state.selection = s } })) {
+            List(selection: Binding(get: { state.picked }, set: { state.pick($0) })) {
                 LiveSidebarRow(state: state, model: model).tag(MainSelection.live)
                 let searching = !state.query.trimmingCharacters(in: .whitespaces).isEmpty
-                let groups = Self.group(library.entries.filter { $0.jsonURL != currentFile() && $0.matches(state.query) })
+                let groups = Self.group(state.visibleEntries)
                 if groups.isEmpty {
                     Text(searching ? "No matches" : "No transcripts yet")
                         .font(.system(size: 11)).foregroundStyle(.tertiary)
@@ -112,8 +176,13 @@ struct MainSidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            .contextMenu(forSelectionType: MainSelection.self) { items in
+                if items.contains(where: { $0 != .live }) {
+                    Button("Move to Trash") { state.askDelete(items) }
+                }
+            }
         }
-        .onDeleteCommand { if state.selectedEntry != nil { state.confirmingDelete = true } }
+        .onDeleteCommand { if state.isBulk || state.selectedEntry != nil { state.confirmingDelete = true } }
         .frame(minWidth: 200)
     }
 
