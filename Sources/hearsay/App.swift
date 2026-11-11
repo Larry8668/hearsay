@@ -146,6 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
+            "pill": { [weak self] in self?.model.barMode = .pill },
+            "full": { [weak self] in self?.model.barMode = .full },
         ]) { _, b in b })
         Log.info("launched (engine \(model.engineID))")
     }
@@ -186,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toggleSource: { [weak self] s in self?.session.setEnabled(s, !SessionController.isEnabled(s)) },
             toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
             toggleRecordingBar: { [weak self] in self?.model.showRecordingBar.toggle(); self?.refresh() },
+            setRecordingBarMode: { [weak self] raw in self?.model.barMode = AppModel.BarMode(rawValue: raw) ?? .full; self?.refresh() },
             setFontSize: { [weak self] size in self?.model.fontSize = size; self?.refresh() },
             setEchoCancellation: { [weak self] raw in
                 guard let self, let choice = EchoCancellation(rawValue: raw), choice != EchoCancellation.current else { return }
@@ -238,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.paused = model.phase == .paused
         s.canPause = model.phase == .listening
         s.showBar = model.showRecordingBar
+        s.barMode = model.barMode.rawValue
         s.busy = model.phase == .starting || model.phase == .stopping
         // The bar's transcript button is "on" while the main window shows the live transcript.
         if model.panelVisible != mainWindow.showingLive { model.panelVisible = mainWindow.showingLive }

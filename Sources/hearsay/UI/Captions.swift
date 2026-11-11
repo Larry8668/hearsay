@@ -46,13 +46,27 @@ final class CaptionsFeed: ObservableObject {
     private var seen: Set<UUID> = []
     private var lines: [Voice: [String]] = [:]
     private var lastActivity: [Voice: Date] = [:]
-    private var lastPartial: [Voice: String] = [:]
+    /// The partial line each block shows: the model's current hypothesis or, while that is
+    /// empty, the last non-empty one. WHY it is held: the hypothesis can go empty for a beat in
+    /// the middle of an utterance (a decoder revision, or the echo filter withholding a "me"
+    /// partial that looks like the speakers); a block with no committed line yet then vanished
+    /// and the idle line faded in. The held text goes when a committed line replaces it or the
+    /// speaker has been silent for `silence`.
+    private var shownPartial: [Voice: String] = [:]
+    /// Voices whose hypothesis is non-empty right now (only these keep a block from expiring).
+    private var live: Set<Voice> = []
+    /// `AppModel.discards` as last applied.
+    private var discards: [Voice: Int] = [:]
     /// Voices in order of first appearance this session.
     private var order: [Voice] = []
+    /// `AppModel.startedAt` of the session the state belongs to; a different one means a new
+    /// session, and everything starts over.
+    private var sessionStart: Date?
 
     init(model: AppModel) {
         self.model = model
         seen = Set(model.lines.map(\.id))
+        sessionStart = model.startedAt
         // Coalesced to the next turn of the run loop: committing a line changes `lines` and then
         // clears the partial, and the in-between state would show the words twice.
         model.objectWillChange.sink { [weak self] in self?.schedule() }.store(in: &subs)
@@ -65,24 +79,29 @@ final class CaptionsFeed: ObservableObject {
     private static let minInterval: TimeInterval = 0.2
 
     private func schedule() {
-        guard !pending else { return }
+        guard active, !pending else { return }
         pending = true
         let wait = max(0, Self.minInterval - Date().timeIntervalSince(lastRun))
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self = self else { return }
             self.pending = false
             self.lastRun = Date()
-            self.update(lines: self.model.lines, partials: self.model.partials)
+            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt)
         }
     }
 
-    /// Runs the expiry clock only while the bar is up.
+    private var active = false
+
+    /// Follows the model and runs the expiry clock only while the captions can be seen (the
+    /// full bar is up); the pill has none, and no work is done for it. Catches up on return.
     func setActive(_ on: Bool) {
         timer?.invalidate(); timer = nil
+        active = on
         guard on else { return }
+        update(lines: model.lines, partials: model.partials, discards: model.discards, session: model.startedAt)
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.update(lines: self.model.lines, partials: self.model.partials)
+            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt)
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -93,7 +112,21 @@ final class CaptionsFeed: ObservableObject {
         if !order.contains(v) { order.append(v) }
     }
 
-    private func update(lines all: [TranscriptLine], partials: [Voice: String], now: Date = Date()) {
+    /// Derives the blocks from the model's lines and partials. Internal so a test can drive it
+    /// with its own clock; the app calls it through `schedule()` and the expiry timer.
+    func update(lines all: [TranscriptLine], partials: [Voice: String], discards: [Voice: Int] = [:],
+                session: Date?, now: Date = Date()) {
+        if session != sessionStart {
+            // A new session (or none): nothing from the last one may show. Not keyed on the
+            // transcript being empty: that is also true for the whole first utterance, and
+            // resetting then wiped the activity that keeps a block up between two partials
+            // (the 1 s timer or the other lane's update dropped it; the next changed partial
+            // brought it back: the "Listening…" flicker).
+            sessionStart = session
+            seen.removeAll(); lines.removeAll(); order.removeAll(); lastActivity.removeAll()
+            shownPartial.removeAll(); live.removeAll()
+            if chipColumn != Self.chipWidth("them") { chipColumn = Self.chipWidth("them") }
+        }
         // New lines can land anywhere near the end (they're sorted by start time); a short
         // suffix is enough to find them without walking a long transcript.
         for line in all.suffix(24) where !seen.contains(line.id) {
@@ -103,18 +136,23 @@ final class CaptionsFeed: ObservableObject {
             let v = Voice(line)
             lines[v, default: []].append(text)
             lines[v] = Array(lines[v]!.suffix(Self.keepLines))
+            // The line is the words that were in progress: the held partial is stale now, and
+            // for "them" so is the one that had no app yet (as in AppModel.clearPartial).
+            shownPartial[v] = nil
+            if v.speaker == .them { shownPartial[Voice(speaker: .them)] = nil }
             noteActivity(v, at: now)
         }
-        if all.isEmpty {   // a new session
-            seen.removeAll(); lines.removeAll(); order.removeAll(); lastActivity.removeAll()
-            if chipColumn != Self.chipWidth("them") { chipColumn = Self.chipWidth("them") }
+        for (v, n) in discards where n != self.discards[v] {   // thrown away as echo: not held
+            self.discards[v] = n
+            shownPartial[v] = nil
         }
-        for v in Set(partials.keys).union(lastPartial.keys) {
+        for v in Set(partials.keys).union(shownPartial.keys) {
             let p = partials[v] ?? ""
-            if p != lastPartial[v] ?? "" {
-                lastPartial[v] = p.isEmpty ? nil : p
-                if !p.isEmpty { noteActivity(v, at: now) }
-            }
+            guard !p.isEmpty else { live.remove(v); continue }   // keep showing the held text
+            live.insert(v)
+            if p != shownPartial[v] { shownPartial[v] = p; noteActivity(v, at: now) }
+            // Once the app is known, the unlabelled "them" entry is the same words under a stale chip.
+            if v.speaker == .them, v.app != nil { shownPartial[Voice(speaker: .them)] = nil }
         }
 
         // me first, then "them" voices as they appeared. Expired voices drop out of the order so
@@ -123,12 +161,12 @@ final class CaptionsFeed: ObservableObject {
         var next: [Block] = []
         for v in order {
             guard let at = lastActivity[v] else { continue }
-            let partial = Self.capped(lastPartial[v] ?? "")
-            if now.timeIntervalSince(at) > Self.silence && partial.isEmpty {
-                lines[v] = nil; lastActivity[v] = nil
+            if now.timeIntervalSince(at) > Self.silence && !live.contains(v) {
+                lines[v] = nil; lastActivity[v] = nil; shownPartial[v] = nil
                 continue
             }
             let committed = lines[v] ?? []
+            let partial = Self.capped(shownPartial[v] ?? "")
             guard !committed.isEmpty || !partial.isEmpty else { continue }
             next.append(Block(voice: v, chip: LaneColors.chipLabel(v.speaker, app: v.app), committed: committed, partial: partial))
         }
@@ -254,12 +292,9 @@ struct CaptionText: View {
             // Scoped to this view: a withAnimation here would animate everything else that
             // happens to change in the bar in the same update.
             .animation(.easeOut(duration: 0.25), value: shownHeight)
+            // The line sliding out of the top is simply clipped (a gradient fade there read as
+            // a smudge).
             .clipped()
-            // The line sliding out of the top dims instead of being chopped.
-            .mask(VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(scrolled ? 0.15 : 1), .black], startPoint: .top, endPoint: .bottom).frame(height: 10)
-                Color.black
-            })
             .onPreferenceChange(TextHeightKey.self) { h in
                 guard abs(h - shownHeight) > 0.5 else { return }
                 var t = Transaction()
