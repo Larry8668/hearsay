@@ -34,10 +34,12 @@ terminal.
 
 ## Development aids
 
-- `Sources/hearsay/Wiring.swift` is the single place where the audio sources and the speech engine are
-  chosen. Until the real ones are wired in it returns the fakes in `Stubs.swift`, which produce
-  canned lines so the whole UI can be exercised without permissions or a model.
-- `HEARSAY_FAKE_DENY=me` (or `them`) makes the fake source fail with "permission denied".
+- `Sources/hearsay/Wiring.swift` is the single place where the audio sources and the speech engine
+  are chosen (the microphone, the per-app or mixed system tap, Parakeet); swap one there to try
+  another.
+- `HEARSAY_AUTOSTART=1` starts listening as soon as the model is ready; `HEARSAY_AUTOMATION=1`
+  lets `distributednotificationcenter` posts of `dev.hearsay.control` with object `toggle` or
+  `pause` drive the session (synthesized key events don't reach the Carbon hotkeys).
 - `HEARSAY_SNAPSHOT_DIR=/tmp/hs` makes the app render its windows to PNGs and the menu to `menu.txt`
   every 2 s, without needing Screen Recording permission:
   `open --env HEARSAY_SNAPSHOT_DIR=/tmp/hs build/hearsay.app`. `HEARSAY_SNAPSHOT_INTERVAL=0.1`
