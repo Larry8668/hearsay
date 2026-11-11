@@ -35,8 +35,8 @@ mixed stream labelled with whichever app is playing.
 
 ## Me and them: blue and orange
 
-Everywhere hearsay shows the two sides, **me is blue** and **them is orange**: the chips in the live
-transcript, the lines on the recording bar, and the two halves of its waveform.
+Everywhere hearsay shows the two sides, **me is blue** and **them is orange**: the chips in the
+hearsay window, the lines on the recording bar, and the two halves of its waveform.
 
 ## Speakers or headphones: echo cancellation
 
@@ -70,8 +70,8 @@ from your call.
 like subtitles: new words appear on the bottom line and older lines slide up and fade out at the
 top. Words still being transcribed are slightly dimmer and firm up when the sentence ends. A side
 that has been quiet for 10 seconds fades away; with nobody talking the card just says
-*Listening…*. The captions only ever show the latest lines; the full text is in the live
-transcript window (≡) and the transcript file.
+*Listening…*. The captions only ever show the latest lines; the full text is in the hearsay
+window (≡) and the transcript file.
 
 **Controls.**
 
@@ -80,8 +80,8 @@ transcript window (≡) and the transcript file.
 - **Waveform**: your microphone in the upper half (blue), what the Mac plays in the lower half
   (orange). A thin line means that side is silent. It freezes and dims while paused.
 - **Time**: how long you've been listening, not counting pauses. Shows *Paused* while paused.
-- **Buttons**: pause / resume, stop (finishes and saves the transcript), and show / hide the live
-  transcript window. Hover a button for its name and shortcut.
+- **Buttons**: pause / resume, stop (finishes and saves the transcript), and show / hide the
+  hearsay window on its live transcript. Hover a button for its name and shortcut.
 - **˅ / ˄**: hides or shows the captions, leaving just the controls. hearsay remembers your choice.
   Nothing happens on hover: the bar never changes size unless you click this.
 
@@ -122,28 +122,64 @@ later. A session in which nobody spoke leaves no file.
 | Status line | *Not listening*, *Listening · 12 min · 48 lines*, or the model download progress |
 | Start / Stop listening | Same as ⌃⌥H |
 | Pause / Resume | Same as ⌃⌥P; only shown during a session |
-| Show live transcript | A small floating window with the transcript as it happens |
+| Open hearsay… | The main window: the live transcript and every saved one (below) |
 | Open transcript | The current session's file, or the most recent one |
 | Open transcripts folder | Documents ▸ hearsay in Finder |
 | Copy transcript | The current or last session as plain text |
 | Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, show the recording bar, echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, show the recording bar, echo cancellation (Auto / Always / Off), the transcript font size, which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now* |
 
-## The live transcript window
+## The hearsay window
 
-Each line has its time, a chip saying who spoke (**me** in blue, **them · Zoom** in orange, with the
-app's name when known) and the text. Consecutive lines from the same side show the chip once. Dimmer
-text at the bottom, with three pulsing dots, is what's being said right now (the last few lines of
-it); it firms up into a line when the sentence ends. In a narrow window the chip and time sit on
-their own line above the text. The window scrolls along while you're at the bottom; scroll up to
-reread and it stays put, with a **New lines** button to jump back down when more arrive.
+**Open hearsay…** in the menu (or the ≡ button on the recording bar, or opening the app again)
+shows the main window: a sidebar on the left, the transcript on the right.
 
-Along the bottom: **Copy all**, **Export SRT**, **Reveal in Finder**, smaller/larger text, and the pin
-(keep above all windows, including a full-screen call). The window follows your light or dark
-appearance and never takes keyboard focus away from your call app.
+```
+┌───────────────┬──────────────────────────────────────────────────────────┐
+│ ● Live        │ ● 12:34  ⏸ Pause  ■ Stop             A A   ⧉   ⋯        │
+│ Listening ·   ├──────────────────────────────────────────────────────────┤
+│ 12:34 · 48 l. │ Live transcript                                          │
+│               │ Listening · 12:34 · 48 lines                             │
+│ TODAY         │ ✓ me   ✓ them · Zoom   ✓ them · Chrome                   │
+│ 14:03  38 min │──────────────────────────────────────────────────────────│
+│ 48 lines·Zoom │ 14:03:12   me   So the deadline moves to Friday?         │
+│ 10:26  12 min │ 14:03:15   them · Zoom   Sounds good, I'll send the…      │
+│ YESTERDAY     │                                                          │
+│ …             │ ⋯                                                        │
+└───────────────┴──────────────────────────────────────────────────────────┘
+```
+
+**Sidebar.** *Live* at the top is the current session (highlighted, with the red dot and the
+listening time, while one is running; afterwards it keeps the last session until the next one
+starts). Below it, every transcript saved in Documents ▸ hearsay, newest first and grouped by
+day, each with its start time, length, line count and the apps heard. New files appear as soon as
+they are saved. ⌃⌘S hides the sidebar.
+
+**Toolbar.** *Start listening* (or *Pause* / *Resume* and *Stop* with the listening time while a
+session runs), smaller / larger text, *Copy*, and under ⋯: *Export subtitles (.srt)*, *Reveal in
+Finder*, *Open in editor* and, for a saved transcript, *Move to Trash…* (confirmed inline, under the
+header; the Markdown and JSON files go to the Trash together).
+
+**Lines.** Each line has its time, a chip saying who spoke (**me** in blue, **them · Zoom** in
+orange, with the app's name when known) and the text. Consecutive lines from the same side show
+the chip once. Dimmer text at the bottom, with three pulsing dots, is what's being said right now
+(the last few lines of it); it firms up into a line when the sentence ends. In a narrow window the
+chip and time sit on their own line above the text. The live view scrolls along while you're at
+the bottom; scroll up to reread and it stays put, with a **New lines** button to jump back down
+when more arrive. A saved transcript starts at the top and shows its pauses where they happened.
+
+**Speaker toggles.** The header has one chip per voice in the transcript (me, them · Zoom,
+them · Chrome…). Click a chip to hide that voice's lines (and, live, its in-progress words);
+click it again, or *Show all*, to bring them back. *Copy* and *Export subtitles* give what is
+shown, so a call with a video playing in another app can be copied without it. The files in
+Documents ▸ hearsay are never affected: every line is always saved. For the live view the choice
+lasts until the next session starts; for a saved transcript, until the window is closed.
+
+The window follows your light or dark appearance, remembers its size and position, and can be
+closed with ⌘W; the session carries on without it.
 
 ## Privacy
 

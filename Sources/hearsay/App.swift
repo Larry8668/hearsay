@@ -61,7 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let model = AppModel()
     private lazy var session = SessionController(model: model)
-    private lazy var panel = LivePanel(model: model)
+    private let library = TranscriptLibrary()
+    /// The running session's file is the sidebar's "Live" entry, not a past transcript; once
+    /// stopped it is listed like any other.
+    private lazy var mainWindow = MainWindow(model: model, library: library, currentFile: { [weak self] in
+        guard let self = self, self.model.isActive else { return nil }
+        return self.session.store?.jsonURL
+    })
     private lazy var welcome = WelcomeWindow(model: model)
     private let updates = UpdateChecker()
     private let hotkey = Hotkey.toggleListening
@@ -80,26 +86,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WelcomeWindow.refreshMic(self.model)
             self.refresh()
         }
+        MainWindow.installMainMenu()
         model.actions = AppModel.Actions(
             toggleListening: { [weak self] in self?.session.toggle() },
-            copyAll: { [weak self] in self?.session.store?.copyAll() },
+            togglePause: { [weak self] in self?.session.togglePause() },
+            stop: { [weak self] in self?.session.stop() },
+            copyAll: { [weak self] hidden in self?.session.store?.copyAll(hiding: hidden) },
             requestMic: { [weak self] in if let m = self?.model { WelcomeWindow.requestMic(m) } },
             openTranscript: { [weak self] in self?.openTranscript() },
             closeWelcome: { [weak self] in self?.welcome.close() },
-            exportSRT: { [weak self] in self?.exportSRT() },
+            exportSRT: { [weak self] hidden in self?.exportSRT(hiding: hidden) },
             revealInFinder: { [weak self] in
                 if let store = self?.session.store { store.revealInFinder() } else { TranscriptStore.openFolder() }
             },
             pauseDownload: { [weak self] in self?.session.pauseDownload() },
             resumeDownload: { [weak self] in self?.session.resumeDownload() },
             cancelDownload: { [weak self] in self?.session.cancelDownload() })
+        // The bar's transcript button toggles the main window on its Live view.
         bar = RecordingBar(model: model, actions: RecordingBar.Actions(
             togglePause: { [weak self] in self?.session.togglePause() },
             stop: { [weak self] in self?.session.stop() },
-            togglePanel: { [weak self] in self?.panel.toggle() }))
+            togglePanel: { [weak self] in self?.mainWindow.toggleLive() }))
 
         session.onChange = { [weak self] in self?.refresh() }
-        panel.onVisibilityChange = { [weak self] in self?.refresh() }
+        mainWindow.onVisibilityChange = { [weak self] in self?.refresh() }
         hotkey.register { [weak self] in
             Log.info("hotkey \(Hotkey.toggleListening.display)")
             self?.session.toggle()
@@ -128,21 +138,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
         if WelcomeWindow.shouldShowAutomatically { welcome.show() }
         DebugSnapshot.installIfRequested { [weak self] in self?.menuBar.menuDescription ?? "" }
-        DebugSnapshot.runScriptIfRequested([
-            "panel": { [weak self] in self?.panel.toggle() },
+        DebugSnapshot.runScriptIfRequested(mainWindow.scriptActions().merging([
+            "panel": { [weak self] in self?.mainWindow.toggleLive() },
             "pause": { [weak self] in self?.session.togglePause() },
             "captions": { [weak self] in self?.bar.toggleCaptions() },
             "pauseDownload": { [weak self] in self?.session.pauseDownload() },
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
-        ])
+        ]) { _, b in b })
         Log.info("launched (engine \(model.engineID))")
     }
 
     /// Accessory app: there's no Dock icon to click, but `open -a hearsay` while running lands here.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        panel.show()
+        mainWindow.show()
         return true
     }
 
@@ -168,10 +178,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MenuBar.Actions(
             toggleListening: { [weak self] in self?.session.toggle() },
             togglePause: { [weak self] in self?.session.togglePause() },
-            togglePanel: { [weak self] in self?.panel.toggle() },
+            togglePanel: { [weak self] in self?.mainWindow.show() },
             openTranscript: { [weak self] in self?.openTranscript() },
             openFolder: { TranscriptStore.openFolder() },
-            exportSRT: { [weak self] in self?.exportSRT() },
+            exportSRT: { [weak self] in self?.exportSRT(hiding: []) },
             copyAll: { [weak self] in self?.session.store?.copyAll() },
             toggleSource: { [weak self] s in self?.session.setEnabled(s, !SessionController.isEnabled(s)) },
             toggleLoginItem: { [weak self] in self?.toggleLoginItem() },
@@ -229,8 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.canPause = model.phase == .listening
         s.showBar = model.showRecordingBar
         s.busy = model.phase == .starting || model.phase == .stopping
-        s.panelVisible = panel.isVisible
-        if model.panelVisible != s.panelVisible { model.panelVisible = s.panelVisible }
+        // The bar's transcript button is "on" while the main window shows the live transcript.
+        if model.panelVisible != mainWindow.showingLive { model.panelVisible = mainWindow.showingLive }
         // The bar follows the session: up while listening/paused (and while the model loads for
         // a requested start), down as soon as Stop is pressed.
         bar?.setVisible(model.isActive && model.showRecordingBar)
@@ -241,7 +251,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.echoCancellation = EchoCancellation.current.rawValue
         s.engine = model.engineID
         menuBar.update(s)
-        panel.setTitle("hearsay — \(s.status)")
     }
 
     private func refreshVersion() {
@@ -249,8 +258,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                checksEnabled: updates.enabled, homebrew: UpdateChecker.installedWithHomebrew)
     }
 
-    private func exportSRT() {
-        if let url = session.store?.exportSRT() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    /// `hiding`: the voices the main window has turned off (the menu passes none).
+    private func exportSRT(hiding hidden: Set<Voice>) {
+        if let url = session.store?.exportSRT(hiding: hidden) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     private func openTranscript() {

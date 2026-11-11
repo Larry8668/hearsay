@@ -41,7 +41,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var canPause = false
         var showBar = true
         var busy = false              // starting / stopping
-        var panelVisible = false
         var hasTranscript = false
         var sources: [Speaker: Bool] = [:]
         var launchAtLogin = false
@@ -90,7 +89,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     /// Top level = essentials only:
     ///   status · warning · permission fixes
-    ///   Start/Stop listening · Pause/Resume · Show live transcript
+    ///   Start/Stop listening · Pause/Resume · Open hearsay…
     ///   Open transcript · Open transcripts folder · More ▸ (SRT, copy)
     ///   Sources ▸  Settings ▸  Troubleshooting ▸
     ///   version/update ▸ · Quit
@@ -120,7 +119,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         pauseItem.keyEquivalent = pauseHotkey.display.last.map { String($0).lowercased() } ?? ""
         pauseItem.keyEquivalentModifierMask = pauseHotkey.menuModifiers
         menu.addItem(pauseItem)
-        panelItem.title = "Show live transcript"
+        panelItem.title = "Open hearsay…"
         bind(panelItem, #selector(togglePanel))
         menu.addItem(panelItem)
         menu.addItem(.separator())
@@ -256,7 +255,6 @@ final class MenuBar: NSObject, NSMenuDelegate {
         pauseItem.isHidden = !s.listening
         pauseItem.isEnabled = s.canPause || s.paused
         barItem.state = s.showBar ? .on : .off
-        panelItem.state = s.panelVisible ? .on : .off
         copyItem.isEnabled = s.hasTranscript
         srtItem.isEnabled = s.hasTranscript
         meItem.state = s.sources[.me] == true ? .on : .off
