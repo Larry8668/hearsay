@@ -57,6 +57,20 @@ final class DiarizerKindTests: XCTestCase {
         XCTAssertEqual(DiarizerKind.configured(d), .sortformer)
     }
 
+    /// Both speaker settings live in `Prefs.store` (the dev suite in dev mode), never in
+    /// `UserDefaults.standard` directly, so a dev build's choice is the one it uses.
+    func testSpeakerSettingsGoThroughPrefsStore() {
+        let (kind, mode) = (Prefs.store.object(forKey: DiarizerKind.key), Prefs.store.object(forKey: DiarizationMode.key))
+        defer { Prefs.store.set(kind, forKey: DiarizerKind.key); Prefs.store.set(mode, forKey: DiarizationMode.key) }
+        DiarizerKind.current = .lseend
+        XCTAssertEqual(Prefs.store.string(forKey: "diarizer"), "lseend")
+        XCTAssertEqual(DiarizerKind.configured(), .lseend, "the default reader is Prefs.store")
+        Prefs.store.set("sortformer", forKey: "diarizer")
+        XCTAssertEqual(DiarizerKind.current, .sortformer)
+        DiarizationMode.current = .all
+        XCTAssertEqual(Prefs.store.string(forKey: "diarization"), "all")
+    }
+
     /// Mid-session the switch waits for the session to end (a new model would renumber everyone).
     func testSwitchingDuringASessionWaitsForItsEnd() async {
         let r = DiarizerRegistry()

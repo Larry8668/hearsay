@@ -115,7 +115,7 @@ Karen / Moira`, 0.4 s gaps):
 
 | Measurement | Sortformer | LS-EEND (DIHARD III) | Without |
 |---|---|---|---|
-| CLI, one stream, unpaced: RTF (wall / audio) | 0.049–0.058 | 0.044 | 0.029 |
+| CLI, one stream, unpaced: RTF (wall / audio) | 0.058 | 0.044 | 0.029 |
 | Peak RSS / peak footprint | 99 MB / 67 MB | 119 MB / 54 MB | 71 MB / 50 MB |
 | `--realtime`: speakers found (voices in the clip: 4) | 3 (Karen merged into Samantha) | 2 (all three female voices merged) | — |
 | Live, through the "them" tap: speakers found / speakers with lines | 4 / 4, but Karen merged into Samantha and Moira split over two slots mid-sentence | 2 / 2 | — |
