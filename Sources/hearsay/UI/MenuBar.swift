@@ -29,6 +29,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var learnVoice: () -> Void
         var forgetVoice: () -> Void
         var showWelcome: () -> Void
+        var showModels: () -> Void = {}
         var openLogs: () -> Void
         var openSettings: (Speaker) -> Void
         var relaunch: () -> Void
@@ -188,6 +189,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         // Settings ▸
         let settings = NSMenu()
         settings.addItem(item("Welcome & permissions…", #selector(showWelcome)))
+        settings.addItem(item("Models…", #selector(showModels)))
         settings.addItem(.separator())
         loginItem.title = "Launch at login"
         bind(loginItem, #selector(toggleLoginItem))
@@ -408,6 +410,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func toggleLoginItem() { actions.toggleLoginItem() }
     @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag) / 10) }
     @objc private func showWelcome() { actions.showWelcome() }
+    @objc private func showModels() { actions.showModels() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func exportDiagnostics() { MainActor.assumeIsolated { Diagnostics.exportInteractively() } }
     @objc private func toggleVerbose() { Log.verboseText.toggle(); verboseItem.state = Log.verboseText ? .on : .off }

@@ -1,4 +1,5 @@
 import AppKit
+import FluidAudio
 import ServiceManagement
 
 @main
@@ -77,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     })
     private lazy var welcome = WelcomeWindow(model: model)
+    private lazy var models = ModelsWindow(model: model)
     private let updates = UpdateChecker()
     private let enrolment = EnrolmentRecorder()
     private let hotkey = Hotkey.toggleListening
@@ -114,6 +116,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pauseDownload: { [weak self] in self?.session.pauseDownload() },
             resumeDownload: { [weak self] in self?.session.resumeDownload() },
             cancelDownload: { [weak self] in self?.session.cancelDownload() },
+            startModelDownload: { [weak self] v, s in self?.session.startChosenDownload(speech: v, speaker: s) },
+            pauseSpeakerDownload: { [weak self] in self?.session.pauseSpeakerDownload() },
+            resumeSpeakerDownload: { [weak self] in self?.session.resumeSpeakerDownload() },
+            cancelSpeakerDownload: { [weak self] in self?.session.cancelSpeakerDownload() },
+            useSpeechModel: { [weak self] v in self?.session.useSpeechModel(v) },
             setLiveMeta: { [weak self] meta in
                 guard let self = self else { return }
                 self.session.store?.meta = meta     // written with the next save (or at once, once a file exists)
@@ -140,8 +147,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updates.start()
         refreshVersion()
 
-        // Model download/load starts now, in the background, so it's usually done by the time
-        // the user first presses Start.
+        // Model load (or, after a choice, download) starts now, in the background, so it's usually
+        // done by the time the user first presses Start. On a first run with models missing the
+        // welcome window's chooser decides what to download, and nothing starts until it does.
+        // Dev aid: HEARSAY_APPEARANCE=light|dark pins the look for screenshots (dev mode only).
+        if DevMode.isDev, let a = ProcessInfo.processInfo.environment["HEARSAY_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: a == "light" ? .aqua : .darkAqua)
+        }
+        let firstRun = WelcomeWindow.shouldShowAutomatically
+        let speakers = DiarizationMode.current != .off
+        model.chooserPending = ModelCatalog.needsChooser(
+            speechOnDisk: ModelStore.isDownloaded(ParakeetEngine.configuredVariant()),
+            speakersWanted: speakers,
+            speakerOnDisk: ModelStore.isDownloaded(DiarizerKind.configured(Prefs.store)),
+            firstRun: firstRun, chosen: Prefs.store.bool(forKey: ModelCatalog.chosenKey))
+        session.showWelcome = { [weak self] in self?.welcome.show() }
         session.prepareEngines()
         // Dev aid / automation: HEARSAY_AUTOSTART=1 starts listening as soon as the models are ready
         // (`open --env HEARSAY_AUTOSTART=1 build/hearsay.app`). Lets an end-to-end test run without
@@ -154,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ticker = t
 
         refresh()
-        if WelcomeWindow.shouldShowAutomatically { welcome.show() }
+        if firstRun || model.chooserPending { welcome.show() }
         DebugSnapshot.installIfRequested { [weak self] in self?.menuBar.menuDescription ?? "" }
         DebugSnapshot.runScriptIfRequested(mainWindow.scriptActions().merging([
             "panel": { [weak self] in self?.mainWindow.toggleLive() },
@@ -180,8 +200,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "diarize": { [weak self] in
                 if let m = DiarizationMode(rawValue: DebugSnapshot.scriptArgument) { self?.session.setDiarization(m) }
             },
-        ]) { _, b in b })
+        ]) { _, b in b }.merging(modelScriptActions()) { _, b in b })
         Log.info("launched (engine \(model.engineID))")
+    }
+
+    /// Script actions for the model chooser and Settings ▸ Models… (see DebugSnapshot.runScriptIfRequested).
+    private func modelScriptActions() -> [String: () -> Void] {
+        [
+            "models": { [weak self] in self?.models.show() },
+            // `download=<speech raw value>/<off|sortformer|lseend>`: the chooser's Download button.
+            "download": { [weak self] in
+                let p = DebugSnapshot.scriptArgument.split(separator: "/").map(String.init)
+                guard p.count == 2, let v = StreamingModelVariant(rawValue: p[0]), let s = ModelCatalog.Speaker(rawValue: p[1]) else { return }
+                self?.session.startChosenDownload(speech: v, speaker: s)
+            },
+            "pauseSpeaker": { [weak self] in self?.session.pauseSpeakerDownload() },
+            "resumeSpeaker": { [weak self] in self?.session.resumeSpeakerDownload() },
+            "cancelSpeaker": { [weak self] in self?.session.cancelSpeakerDownload() },
+        ]
     }
 
     /// Accessory app: there's no Dock icon to click, but `open -a hearsay` while running lands here.
@@ -242,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             learnVoice: { [weak self] in self?.learnVoice() },
             forgetVoice: { [weak self] in Enrolment.forget(); self?.refresh() },
             showWelcome: { [weak self] in self?.welcome.show() },
+            showModels: { [weak self] in self?.models.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
             openSettings: { SettingsLinks.open(for: $0) },
             relaunch: { [weak self] in self?.relaunch() },

@@ -4,6 +4,29 @@ hearsay lives in the menu bar as a waveform that reads like a switch: greyed out
 **green** while listening, an **orange** pause symbol while paused, and a **yellow** warning
 triangle when something needs your attention (a permission, the speech model).
 
+## First run: choose your models
+
+Nothing downloads until you say so. The welcome window's **Choose your models** step asks for:
+
+- **Speech to text** (required, pick one): *Best accuracy* is Parakeet Unified 0.6B, about 580 MB,
+  with punctuation and numbers; *Smaller and faster* is Parakeet EOU 120M, about 214 MB, with
+  roughly three times the mistakes, all lowercase and no punctuation.
+- **Tell speakers apart** (optional): *Off*, *Up to 4 speakers, steadiest* (Sortformer, about
+  234 MB, the default) or *Up to 10 speakers* (LS-EEND, about 43 MB). *Off* also turns
+  Settings ▸ Tell speakers apart off.
+
+It shows the total ("Downloads about 814 MB, stays on this Mac"); **Download** then fetches the
+speech model first and the speaker model after it, each with its own progress row and
+**Pause / Resume / Cancel**. **Start listening** unlocks once the speech model is ready. Cancelling
+the speech model brings the choice back. Models already on this Mac (after a reinstall or an
+update) are used as they are and never downloaded again; if they are all there, the step is skipped.
+
+**Settings ▸ Models…** lists every model with what it does, its size and its status (*Downloaded ·
+580 MB*, *Not downloaded*, *Downloading 43%*), with **Use**, **Download** and **Delete** (not for a
+model in use; it frees the disk space). A new speech model applies from the next session, a new
+speaker model the next time hearsay starts. `HEARSAY_MODELS_DIR` points a dev build at another
+folder (see [Building](BUILDING.md)).
+
 ## Start and stop
 
 - **⌃⌥H** (Control-Option-H) starts or stops listening from any app.
@@ -68,8 +91,9 @@ it hearing you). If it heard too little it says so and offers *Try again*. From 
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
 
-The model (NVIDIA Streaming Sortformer, 234 MB) is downloaded the first time the setting is on and
-kept with the speech models. It tells up to four voices apart per source; a fifth is merged into
+The model (NVIDIA Streaming Sortformer, 234 MB) is downloaded when you pick it in the welcome
+window (or the first time the setting is turned on) and kept with the speech models; see
+Settings ▸ Models… to delete it. It tells up to four voices apart per source; a fifth is merged into
 the closest one. Two very similar voices (the same pitch and accent) can land in one slot. Turning
 the setting on or off during a session restarts the affected source, so the change applies at
 once. `defaults write dev.hearsay.app diarizer lseend` (or `lseend-ami`) swaps in the LS-EEND model

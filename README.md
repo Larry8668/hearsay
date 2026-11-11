@@ -43,7 +43,7 @@ Neural Engine, and saves a Markdown transcript when you stop.
 - **Speakers or headphones.** With speakers, echo cancellation and a text-level echo filter keep
   the other side out of your lane.
 - **Offline, private.** The speech model (about 580 MB) and the speaker model (234 MB) are
-  downloaded once and run locally. The
+  downloaded once, when you choose them, and run locally. The
   only network request hearsay ever makes is an optional daily check for a new version.
 - **Light.** About 8% of one core while listening with headphones, 1% when idle.
 
@@ -67,7 +67,8 @@ notarised). To build it yourself, see [Building from source](docs/BUILDING.md).
 
 ## Getting started
 
-1. **Open hearsay.** It downloads the speech model and asks for **Microphone** access.
+1. **Open hearsay.** Choose which models to download (the speech model, about 580 MB or a
+   smaller 214 MB one; optionally a speaker model, 43 to 234 MB), then allow **Microphone** access.
 2. **Start listening** with ⌃⌥H or from the menu-bar waveform. The first time, macOS asks for
    **System Audio Recording**.
 3. **Talk.** The bar at the bottom shows live captions; its list button opens the hearsay

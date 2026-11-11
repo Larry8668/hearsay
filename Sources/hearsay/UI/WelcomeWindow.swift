@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import FluidAudio
 import SwiftUI
 
 /// First-launch window (and Settings ▸ Welcome & permissions… later). One page: what hearsay does,
@@ -93,11 +94,19 @@ struct WelcomeView: View {
                     Image(systemName: "info.circle").foregroundStyle(.secondary)
                         .help("Allow hearsay under Screen & System Audio Recording ▸ System Audio Recording Only. It records sound only, never your screen.")
                 }
-                Divider().padding(.leading, 44)
-                row(symbol: "cpu", tint: .purple, title: "Speech model", note: modelNote) { modelAccessory }
+                if !model.chooserPending {
+                    Divider().padding(.leading, 44)
+                    row(symbol: "cpu", tint: .purple, title: "Speech model", note: modelNote) { modelAccessory }
+                    if showsSpeakerRow {
+                        Divider().padding(.leading, 44)
+                        row(symbol: "person.2.fill", tint: .teal, title: "Speaker model", note: speakerNote) { speakerAccessory }
+                    }
+                }
             }
             .padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+
+            if model.chooserPending { chooser }
 
             HStack {
                 Text("⌃⌥H starts and stops from any app. The bar's ≡ button opens the hearsay window with the full transcript.")
@@ -109,16 +118,118 @@ struct WelcomeView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(model.isActive)
+                .disabled(model.isActive || model.modelState != .ready)
             }
         }
         .padding(26)
         .frame(width: 540)
     }
 
+    // MARK: Choose your models
+
+    @State private var speechPick = ParakeetEngine.configuredVariant()
+    @State private var speakerPick: ModelCatalog.Speaker = Prefs.store.string(forKey: "diarization") == "off" ? .off : ModelCatalog.configuredSpeaker()
+
+    private var speech: ModelCatalog.Speech { ModelCatalog.speech.first { $0.variant == speechPick } ?? ModelCatalog.speech[0] }
+
+    private var downloadBytes: Int64 {
+        ModelCatalog.bytesToDownload(speech: speech, speaker: speakerPick,
+                                     speechOnDisk: ModelStore.isDownloaded(speech.variant), speakerOnDisk: ModelStore.isDownloaded(speakerPick))
+    }
+
+    /// One card in the style of the rows above: a header row with a coloured tile, then the options.
+    private var chooser: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose your models").font(.headline)
+            VStack(spacing: 0) {
+                row(symbol: "cpu", tint: .purple, title: "Speech to text", note: "Required · pick one") { EmptyView() }
+                ForEach(ModelCatalog.speech) { s in
+                    option(selected: speechPick == s.variant, title: s.title, detail: "\(s.name) · \(s.detail)",
+                           size: ModelStore.isDownloaded(s.variant) ? "On this Mac" : "~\(s.megabytes) MB") { speechPick = s.variant }
+                }
+                Divider().padding(.leading, 44)
+                row(symbol: "person.2.fill", tint: .teal, title: "Tell speakers apart", note: "Optional · labels who is talking within me and them") { EmptyView() }
+                ForEach(ModelCatalog.Speaker.allCases) { s in
+                    option(selected: speakerPick == s, title: s.title, detail: s == .off ? s.detail : "\(s.name) · \(s.detail)",
+                           size: s == .off ? "" : ModelStore.isDownloaded(s) ? "On this Mac" : "~\(s.megabytes) MB") { speakerPick = s }
+                }
+            }
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+            HStack {
+                Label(ModelCatalog.totalText(bytes: downloadBytes), systemImage: "arrow.down.circle")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer(minLength: 16)
+                Button(downloadBytes == 0 ? "Continue" : "Download") {
+                    model.actions.startModelDownload(speech.variant, speakerPick)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+            }
+        }
+    }
+
+    /// A radio-style choice, indented under its header row.
+    private func option(selected: Bool, title: String, detail: String, size: String, pick: @escaping () -> Void) -> some View {
+        Button(action: pick) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(selected ? Color.accentColor : .secondary).frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).fontWeight(.medium)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Text(size).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Speaker model row
+
+    /// Only after a chooser download this launch (existing users see the same rows as before).
+    private var showsSpeakerRow: Bool { model.chosenThisRun && model.diarization != .off }
+
+    private var speakerNote: String {
+        switch model.diarizerState {
+        case .notDownloaded: return model.modelState == .ready ? "Preparing…" : "Starts after the speech model"
+        case .downloading(let f): return f < 0 ? "Preparing…" : "Downloading \(Int(f * 100))% · stays on this Mac"
+        case .paused(let f): return f < 0 ? "Download paused" : "Paused at \(Int(f * 100))% · resumes from here"
+        case .ready: return "Ready · stays on this Mac"
+        case .failed(let e): return "Couldn't download or load it: \(e)"
+        }
+    }
+
+    @ViewBuilder private var speakerAccessory: some View {
+        switch model.diarizerState {
+        case .downloading(let f):
+            HStack(spacing: 8) {
+                if f >= 0 { ProgressView(value: f).frame(width: 90) } else { ProgressView().controlSize(.small) }
+                smallButton("pause.fill", "Pause the download; it resumes from the same point") { model.actions.pauseSpeakerDownload() }
+                smallButton("xmark", "Cancel, delete what was downloaded and turn speakers off") { model.actions.cancelSpeakerDownload() }
+            }
+        case .paused(let f):
+            HStack(spacing: 8) {
+                if f >= 0 { ProgressView(value: f).frame(width: 90).tint(.secondary) }
+                smallButton("play.fill", "Resume the download") { model.actions.resumeSpeakerDownload() }
+                smallButton("xmark", "Cancel, delete what was downloaded and turn speakers off") { model.actions.cancelSpeakerDownload() }
+            }
+        case .notDownloaded:
+            if model.modelState == .ready { ProgressView().controlSize(.small) }
+        case .ready: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+        case .failed:
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).font(.title3)
+                Button("Retry") { model.actions.resumeSpeakerDownload() }.controlSize(.small)
+            }
+        }
+    }
+
     private var modelNote: String {
         switch model.modelState {
-        case .notDownloaded: return "Downloaded once (about 580 MB), stays on this Mac"
+        case .notDownloaded: return "Downloaded once, stays on this Mac"
         case .downloading(let f): return f < 0 ? "Preparing…" : "Downloading \(Int(f * 100))% · stays on this Mac"
         case .paused(let f): return f < 0 ? "Download paused" : "Paused at \(Int(f * 100))% · resumes from here"
         case .ready: return "Ready · \(model.engineID) · stays on this Mac"
