@@ -61,8 +61,9 @@ to the speech model and tells voices apart as they talk:
 
 Numbers are per session: *Speaker 1* in today's meeting is whoever spoke first, not the same person
 as yesterday's *Speaker 1*. To have your own voice recognised, use **Settings ▸ Tell speakers
-apart ▸ Learn my voice…** while not listening: a small panel counts down 10 seconds while you read
-anything aloud, and from the next session on your voice is labelled **me** and everyone else
+apart ▸ Learn my voice…** while not listening: a small panel shows three short sentences; press
+**Start** and read them aloud in your normal voice (15 seconds, with a level meter so you can see
+it hearing you). If it heard too little it says so and offers *Try again*. From the next session on your voice is labelled **me** and everyone else
 **Speaker 1, 2…**. The clip stays on this Mac (`~/Library/Application Support/hearsay/voice/me.wav`);
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.

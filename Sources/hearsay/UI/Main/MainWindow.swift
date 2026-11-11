@@ -288,6 +288,11 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     /// (rename: the first voice chip) · `name=…`: name the first voice · `search=…`: filter the
     /// sidebar · `yourname=…`: Settings ▸ Your name · `more`: open the ⋯ menu · `export`: the
     /// Export… panel.
+    @objc private func popUpMoreMenu() {
+        guard let menu = moreMenu, let view = window?.contentView else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 40, y: view.bounds.maxY - 4), in: view)
+    }
+
     func scriptActions() -> [String: () -> Void] {
         [
             "window": { [weak self] in self?.show() },
@@ -302,14 +307,12 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             "rename": { [weak self] in if let v = self?.shownVoices().first { self?.state.editing = .rename(v) } },
             "search": { [weak self] in self?.state.query = DebugSnapshot.scriptArgument },
             "yourname": { [weak self] in self?.model.yourName = TranscriptMeta.cleanTitle(DebugSnapshot.scriptArgument) },
+            // A pop-up menu tracks modally. Opened from inside a main-queue block it would keep that
+            // block (and every later one: the next script step, the SIGTERM quit) waiting until it
+            // closes; a zero-delay perform runs from the run loop, outside any GCD block.
             "more": { [weak self] in
-                guard let self = self, let menu = self.moreMenu, let view = self.window?.contentView else { return }
-                // A pop-up menu tracks modally. Opened from inside a main-queue block it would keep that
-                // block (and every later one: the next script step, the SIGTERM quit) waiting until it
-                // closes; a run-loop perform runs outside any GCD block, so the queue keeps draining.
-                RunLoop.main.perform {
-                    menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 40, y: view.bounds.maxY - 4), in: view)
-                }
+                guard let self = self else { return }
+                self.perform(#selector(self.popUpMoreMenu), with: nil, afterDelay: 0)
             },
             // Pop-up menus track modally; this closes one opened by "more" so a scripted run can go on.
             "closemenu": { [weak self] in self?.moreMenu?.cancelTracking() },
