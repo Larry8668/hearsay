@@ -2,8 +2,10 @@ import CoreML
 import FluidAudio
 import Foundation
 
-/// Which FluidAudio streaming diarizer tells speakers apart. `defaults write dev.hearsay.app
-/// diarizer lseend` switches without a rebuild; see `SpeakerDiarizer` for the comparison.
+/// Which FluidAudio streaming diarizer tells speakers apart: Settings ▸ Tell speakers apart ▸
+/// Model, stored under `diarizer` in `Prefs.store` (the first-run model chooser writes the same
+/// key). `defaults write dev.hearsay.app diarizer lseend-ami` reaches the variant the menu does
+/// not offer. See `SpeakerDiarizer` for the comparison.
 enum DiarizerKind: String, CaseIterable, Sendable {
     /// NVIDIA Streaming Sortformer v2.1 (fast tier): 4 slots, stable identities, robust to noise.
     case sortformer
@@ -13,23 +15,60 @@ enum DiarizerKind: String, CaseIterable, Sendable {
     case lseendAmi = "lseend-ami"
 
     static let `default`: DiarizerKind = .sortformer
+    static let key = "diarizer"
+    /// The choices the menu and the model chooser offer; `lseendAmi` stays a defaults-only experiment.
+    static let offered: [DiarizerKind] = [.sortformer, .lseend]
 
-    static func configured(_ defaults: UserDefaults = .standard) -> DiarizerKind {
-        guard let raw = defaults.string(forKey: "diarizer") else { return .default }
+    static func configured(_ defaults: UserDefaults = Prefs.store) -> DiarizerKind {
+        guard let raw = defaults.string(forKey: key) else { return .default }
         guard let k = DiarizerKind(rawValue: raw) else {
-            Log.warn("diarizer: unknown diarizer '\(raw)', using \(DiarizerKind.default.rawValue)")
+            Log.warn(.diarize, "diarizer: unknown diarizer '\(raw)', using \(DiarizerKind.default.rawValue)")
             return .default
         }
         return k
     }
 
+    /// The stored choice. Setting it only persists: `SessionController.setDiarizer` also swaps
+    /// the loaded model (or queues the swap for the next session).
+    static var current: DiarizerKind {
+        get { configured() }
+        set { Prefs.store.set(newValue.rawValue, forKey: key) }
+    }
+
+    /// The model's name: "Sortformer", "LS-EEND".
     var displayName: String {
         switch self {
-        case .sortformer: return "Sortformer v2.1"
-        case .lseend: return "LS-EEND (DIHARD III)"
+        case .sortformer: return "Sortformer"
+        case .lseend: return "LS-EEND"
         case .lseendAmi: return "LS-EEND (AMI)"
         }
     }
+
+    /// What choosing it means, in people's terms: "Steady, up to 4 speakers".
+    var summary: String {
+        switch self {
+        case .sortformer: return "Steady, up to 4 speakers"
+        case .lseend: return "More speakers, up to 10"
+        case .lseendAmi: return "Meeting rooms, up to 4 speakers"
+        }
+    }
+
+    /// Voices one stream can tell apart; a further voice is merged into the closest slot.
+    var maxSpeakers: Int { self == .lseend ? 10 : 4 }
+
+    /// Approximate download (the compiled models on disk), in bytes.
+    var downloadSize: Int64 {
+        switch self {
+        case .sortformer: return 234 << 20
+        case .lseend, .lseendAmi: return 43 << 20
+        }
+    }
+
+    /// "Steady, up to 4 speakers (Sortformer, 234 MB)": the menu item.
+    var menuTitle: String { "\(summary) (\(displayName), \(downloadSize >> 20) MB)" }
+
+    /// Complete on disk: choosing it needs no download.
+    var isDownloaded: Bool { ModelStore.isDownloaded(self) }
 
     var sortformerConfig: SortformerConfig { .fastV2_1 }
     var lseendVariant: LSEENDVariant { self == .lseendAmi ? .ami : .dihard3 }

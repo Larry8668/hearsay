@@ -101,7 +101,7 @@ struct ModelsView: View {
                     speechRow(s)
                 }
             }
-            section("Tell speakers apart", note: "Optional. Which one is used is chosen here; a change applies the next time hearsay starts.") {
+            section("Tell speakers apart", note: "Optional. A change applies at once when not listening, otherwise from the next session.") {
                 ForEach(Array(ModelCatalog.Speaker.models.enumerated()), id: \.element.id) { i, s in
                     if i > 0 { Divider().padding(.leading, 12) }
                     speakerRow(s)
@@ -146,7 +146,7 @@ struct ModelsView: View {
                        downloaded: downloaded, bytes: ModelStore.diskSize(s), declared: s.bytes, state: state,
                        selected: selected, active: active) { action in
             switch action {
-            case .use: Prefs.store.set(s.rawValue, forKey: ModelCatalog.diarizerKey); vm.refresh += 1
+            case .use: model.actions.useSpeakerModel(s.rawValue); vm.refresh += 1
             case .download: if live { model.actions.resumeSpeakerDownload() } else { vm.downloadSpeaker(s) }
             case .delete: vm.deleteSpeaker(s)
             case .cancel: if live { model.actions.cancelSpeakerDownload() } else { vm.cancelSpeaker(s) }

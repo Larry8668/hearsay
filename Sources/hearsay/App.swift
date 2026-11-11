@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resumeSpeakerDownload: { [weak self] in self?.session.resumeSpeakerDownload() },
             cancelSpeakerDownload: { [weak self] in self?.session.cancelSpeakerDownload() },
             useSpeechModel: { [weak self] v in self?.session.useSpeechModel(v) },
+            useSpeakerModel: { [weak self] raw in if let k = DiarizerKind(rawValue: raw) { self?.session.setDiarizer(k) } },
             setLiveMeta: { [weak self] meta in
                 guard let self = self else { return }
                 self.session.store?.meta = meta     // written with the next save (or at once, once a file exists)
@@ -200,6 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "diarize": { [weak self] in
                 if let m = DiarizationMode(rawValue: DebugSnapshot.scriptArgument) { self?.session.setDiarization(m) }
             },
+            // `diarizer=sortformer|lseend`: Settings ▸ Tell speakers apart ▸ Model.
+            "diarizer": { [weak self] in
+                if let k = DiarizerKind(rawValue: DebugSnapshot.scriptArgument) { self?.session.setDiarizer(k) }
+            },
         ]) { _, b in b }.merging(modelScriptActions()) { _, b in b })
         Log.info("launched (engine \(model.engineID))")
     }
@@ -275,6 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setDiarization: { [weak self] raw in
                 if let mode = DiarizationMode(rawValue: raw) { self?.session.setDiarization(mode) }
             },
+            setDiarizer: { [weak self] raw in
+                if let kind = DiarizerKind(rawValue: raw) { self?.session.setDiarizer(kind) }
+            },
             learnVoice: { [weak self] in self?.learnVoice() },
             forgetVoice: { [weak self] in Enrolment.forget(); self?.refresh() },
             showWelcome: { [weak self] in self?.welcome.show() },
@@ -332,6 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.fontSize = model.fontSize
         s.echoCancellation = EchoCancellation.current.rawValue
         s.diarization = model.diarization.rawValue
+        s.diarizer = DiarizerKind.current.rawValue
         s.voiceEnrolled = Enrolment.exists
         s.engine = model.engineID
         s.yourName = model.yourName

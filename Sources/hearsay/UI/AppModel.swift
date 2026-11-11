@@ -91,6 +91,8 @@ final class AppModel: ObservableObject {
         var cancelSpeakerDownload: () -> Void = {}
         /// Settings ▸ Models…: make this the speech model, from the next session.
         var useSpeechModel: (StreamingModelVariant) -> Void = { _ in }
+        /// Settings ▸ Models… ▸ Use on a speaker model: the same switch as Tell speakers apart ▸ Model.
+        var useSpeakerModel: (String) -> Void = { _ in }
         /// Title / tags / names for the live (or last) session: stored in its transcript files.
         var setLiveMeta: (TranscriptMeta) -> Void = { _ in }
         /// The session's transcript store (current, or the last one), for Export… of the live view.
