@@ -195,7 +195,7 @@ _Tags: design, q4 · Apps heard: Zoom · Engine: parakeet-unified-640ms · Made 
 | Open transcript | The current session's file, or the most recent one |
 | Open transcripts folder | Documents ▸ hearsay in Finder |
 | Copy transcript | The current or last session as plain text |
-| Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
+| Export transcript ▸ | The current or last session as Markdown, JSON, plain text or subtitles (.srt), through a save panel; or **Copy as Markdown** (handy to paste into an AI chat as context) / **Copy as JSON**. Hidden speakers are left out |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
 | Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, export diagnostics (a zip of the logs plus a system report, never your transcripts) to attach to a bug report, turn on verbose logging (also logs spoken text; off by default), jump to the Microphone / System Audio privacy settings, relaunch hearsay |
@@ -261,12 +261,14 @@ voice…*), or to the lane while it has only one voice.
 
 **Toolbar.** *Start listening* (or *Pause* / *Resume* and *Stop* with the listening time while a
 session runs), smaller / larger text, *Copy* (plain text, one timed line each), and under ⋯:
-*Export…*, *Export subtitles (.srt)*, *Copy as text* / *Copy as Markdown*, *Reveal in Finder*,
+*Export as Markdown / JSON / Plain text / Subtitles…*, *Copy as text* / *Copy as Markdown (for an
+AI chat)* / *Copy as JSON*, *Reveal in Finder*,
 *Open in editor* and, for a saved transcript, *Move to Trash…* (confirmed inline, under the
 header; the Markdown and JSON files go to the Trash together; with several selected it reads
 *Move N Transcripts to Trash…*).
 
-**Export.** *Export…* (also File ▸ Export…, ⌘E) opens a save panel with a format popup:
+**Export.** ⋯ ▸ *Export as …* opens a save panel on that format; File ▸ Export… (⌘E) opens it on
+the last format used, and the panel's format popup can still change it:
 **Markdown** (.md, the same layout as the saved file), **JSON** (.json, the sidecar's layout with
 the title, tags and names), **Plain text** (.txt, "name: text" per line, no times) and
 **Subtitles** (.srt, times from the start of the session). The suggested file name is the title,

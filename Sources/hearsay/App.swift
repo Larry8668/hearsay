@@ -216,6 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openTranscript: { [weak self] in self?.openTranscript() },
             openFolder: { TranscriptStore.openFolder() },
             exportSRT: { [weak self] in self?.exportSRT(hiding: []) },
+            exportAs: { [weak self] raw in if let f = ExportFormat(rawValue: raw) { self?.mainWindow.exportSession(f) } },
+            copyAs: { [weak self] raw in if let f = ExportFormat(rawValue: raw) { self?.mainWindow.copySession(f) } },
             copyAll: { [weak self] in self?.session.store?.copyAll() },
             toggleSource: { [weak self] s in self?.session.setEnabled(s, !SessionController.isEnabled(s)) },
             toggleLoginItem: { [weak self] in self?.toggleLoginItem() },

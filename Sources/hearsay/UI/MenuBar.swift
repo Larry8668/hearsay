@@ -12,6 +12,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var openTranscript: () -> Void
         var openFolder: () -> Void
         var exportSRT: () -> Void
+        /// Export the current or last session as `ExportFormat` raw value ("markdown", "json", …).
+        var exportAs: (String) -> Void = { _ in }
+        var copyAs: (String) -> Void = { _ in }
         var copyAll: () -> Void
         var toggleSource: (Speaker) -> Void
         var toggleLoginItem: () -> Void
@@ -154,8 +157,20 @@ final class MenuBar: NSObject, NSMenuDelegate {
         menu.addItem(item("Open transcripts folder", #selector(openFolder)))
         copyItem.title = "Copy transcript"
         bind(copyItem, #selector(copyAll))
-        srtItem.title = "Export subtitles (.srt)"
-        bind(srtItem, #selector(exportSRT))
+        srtItem.title = "Export transcript"
+        let exportMenu = NSMenu()
+        for f in ExportFormat.allCases {
+            let mi = NSMenuItem(title: "\(f.title)…", action: #selector(exportAs(_:)), keyEquivalent: "")
+            mi.target = self; mi.representedObject = f.rawValue
+            exportMenu.addItem(mi)
+        }
+        exportMenu.addItem(.separator())
+        for (title, f) in [("Copy as Markdown (for an AI chat)", ExportFormat.markdown), ("Copy as JSON", .json)] {
+            let mi = NSMenuItem(title: title, action: #selector(copyAs(_:)), keyEquivalent: "")
+            mi.target = self; mi.representedObject = f.rawValue
+            exportMenu.addItem(mi)
+        }
+        srtItem.submenu = exportMenu
         menu.addItem(copyItem)
         menu.addItem(srtItem)
         menu.addItem(.separator())
@@ -385,6 +400,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func openTranscript() { actions.openTranscript() }
     @objc private func openFolder() { actions.openFolder() }
     @objc private func exportSRT() { actions.exportSRT() }
+    @objc private func exportAs(_ sender: NSMenuItem) { if let raw = sender.representedObject as? String { actions.exportAs(raw) } }
+    @objc private func copyAs(_ sender: NSMenuItem) { if let raw = sender.representedObject as? String { actions.copyAs(raw) } }
     @objc private func copyAll() { actions.copyAll() }
     @objc private func toggleMe() { actions.toggleSource(.me) }
     @objc private func toggleThem() { actions.toggleSource(.them) }
