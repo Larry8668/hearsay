@@ -29,7 +29,9 @@ enum DevMode {
     /// Distributed-notification name for `HEARSAY_AUTOMATION=1` control; the dev instance listens on `.dev`.
     static func controlNotificationName(dev: Bool) -> String { dev ? "dev.hearsay.control.dev" : "dev.hearsay.control" }
 
-    static var logFileName: String { isDev ? "hearsay-dev.log" : "hearsay.log" }
+    /// Both flavours share ~/Library/Logs/hearsay; add a base name here and pruning keeps it.
+    static let logBaseNames = ["hearsay.log", "hearsay-dev.log"]
+    static var logFileName: String { isDev ? logBaseNames[1] : logBaseNames[0] }
 }
 
 /// Every preference goes through `Prefs.store`, so dev mode never touches the installed app's settings.
