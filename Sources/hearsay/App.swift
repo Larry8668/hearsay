@@ -132,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "panel": { [weak self] in self?.panel.toggle() },
             "pause": { [weak self] in self?.session.togglePause() },
             "captions": { [weak self] in self?.bar.toggleCaptions() },
+            "pauseDownload": { [weak self] in self?.session.pauseDownload() },
+            "resumeDownload": { [weak self] in self?.session.resumeDownload() },
+            "cancelDownload": { [weak self] in self?.session.cancelDownload() },
+            "welcome": { [weak self] in self?.welcome.show() },
         ])
         Log.info("launched (engine \(model.engineID))")
     }

@@ -110,6 +110,12 @@ final class SessionController {
                 startWhenReady = false
                 if model.phase == .starting { model.phase = .idle }
             } catch {
+                if downloadIntent != nil {   // whatever the download threw while we were stopping it
+                    model.modelState = downloadIntent == .cancel ? .notDownloaded : .paused(fraction: downloadFraction)
+                    startWhenReady = false
+                    if model.phase == .starting { model.phase = .idle }
+                    prepareTask = nil; onChange(); return
+                }
                 Log.error("engine prepare failed: \(error)")
                 model.modelState = .failed(error.localizedDescription)
                 startWhenReady = false
