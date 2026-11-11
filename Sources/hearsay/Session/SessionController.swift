@@ -78,6 +78,56 @@ final class SessionController {
         }
     }
 
+    // MARK: Speakers (diarization)
+
+    /// Settings ▸ Tell speakers apart. Persists the mode, loads (or drops) the speaker model and,
+    /// mid-session, restarts the lanes whose setting changed so the diarizer joins or leaves them
+    /// now rather than at the next start.
+    func setDiarization(_ mode: DiarizationMode) {
+        guard mode != model.diarization else { return }
+        model.diarization = mode
+        Log.info("diarization set to \(mode.rawValue)")
+        onChange()
+        Task {
+            let before = await DiarizerRegistry.shared.mode
+            await DiarizerRegistry.shared.setMode(mode)
+            if mode == .off {
+                await DiarizerRegistry.shared.unload()
+                model.diarizerState = .notDownloaded
+            } else {
+                await prepareDiarizer()
+            }
+            guard model.phase == .listening else { onChange(); return }
+            for s in Array(lanes.keys) where before.covers(s) != mode.covers(s) {
+                await stopLane(s)
+                await startLane(s)
+            }
+            onChange()
+        }
+    }
+
+    /// Downloads / loads the diarizer unless the mode is Off; progress lands in the status line.
+    func prepareDiarizer() async {
+        let report: @Sendable (ModelState) -> Void = { [weak self] state in
+            Task { @MainActor in
+                guard let self, self.model.diarizerState != state else { return }
+                self.model.diarizerState = state
+                self.onChange()
+            }
+        }
+        do { try await DiarizerRegistry.shared.prepare(progress: report) } catch {
+            showWarning("Speaker model unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    /// Names a diarized speaker in the transcript file and the live views.
+    func rename(speaker id: String, to name: String) {
+        store?.rename(speaker: id, to: name)
+        var r = model.speakers
+        r.rename(id, to: name)
+        model.speakers = r
+    }
+
     // MARK: Engine preparation
 
     /// Creates both engines and prepares them (model download / load). Safe to call again after a
@@ -97,6 +147,8 @@ final class SessionController {
                 for engine in engines { try await engine.prepare(progress: report) }
                 Log.info("engines ready: \(model.engineID)")
                 model.modelState = .ready; enginesReady = true
+                // After the speech models: both downloads toggle FluidAudio's offline mode.
+                await prepareDiarizer()
             } catch {
                 Log.error("engine prepare failed: \(error)")
                 model.modelState = .failed(error.localizedDescription)
@@ -149,6 +201,7 @@ final class SessionController {
         model.startedAt = now
         model.lines = []
         model.partials = [:]
+        model.speakers = SpeakerRoster()
         model.pausedTotal = 0
         model.pausedAt = nil
         model.permissionDenied = []
@@ -159,6 +212,7 @@ final class SessionController {
         echo = EchoFilter()
         levelHistory.clear()
         startTask = Task {
+            await DiarizerRegistry.shared.beginSession()   // fresh speaker slots for a new transcript
             await startLanes(speakers)
             startTask = nil
             if lanes.isEmpty {
@@ -186,6 +240,7 @@ final class SessionController {
         stopTask = Task {
             for t in pending { await t?.value }
             for s in Array(lanes.keys) { await stopLane(s) }
+            await DiarizerRegistry.shared.endSession()
             store?.finish()               // closes a pause still open (stop while paused)
             model.partials = [:]
             model.pausedAt = nil

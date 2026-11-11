@@ -53,6 +53,53 @@ load depends on what they hear); for before/after comparisons play the same clip
 (`say -o clip.aiff "…"`, `afplay clip.aiff`), take `ps -o cputime= -p <pid>` at both ends of a
 fixed 20 s window, and interleave the variants over a few rounds. Engines alone: `hearsay --transcribe a.wav --realtime --two b.wav`.
 
+## Telling speakers apart
+
+Measured 2026-11-11, same machine, release build, Streaming Sortformer v2.1 (fast tier, fp16,
+`SortformerConfig.fastV2_1`, CPU + Neural Engine) on the microphone lane. Download 234 MB
+(`~/Library/Application Support/hearsay/models/sortformer`); LS-EEND (DIHARD III, 100 ms steps)
+43 MB.
+
+| Measurement | Sortformer | LS-EEND | Without |
+|---|---|---|---|
+| CLI, one stream, 37 s clip of three voices, `--realtime`: process CPU time | 0.9 s | 2.7 s | 1.3–1.8 s |
+| … as a share of one core while someone talks | within run-to-run noise (≤ 1%) | ~3% | — |
+| Peak RSS of that run | 96 MB | 118 MB | 68 MB |
+| Model load (warm compile cache) | 0.1 s | 0.0 s | — |
+| First download + load | 113 s (234 MB) | 10 s (43 MB) | — |
+
+Where it goes:
+
+- **Sortformer runs on the Neural Engine**: one inference per 480 ms of audio (6 output frames of
+  80 ms, 7 frames of look-ahead), so its CPU share is the mel spectrogram and the state update,
+  too small to separate from the speech model's own variance between runs. LS-EEND runs on the
+  CPU (FluidAudio's recommendation; its ANE build is slower) at ten inferences a second.
+- **Nothing while the lane is silent.** The diarizer is fed only while the chunk has a voiced
+  20 ms frame (the tracker's −44 dBFS threshold) and for 1.2 s after (its look-ahead plus one
+  chunk, so the frames of the speech get decided); skipped stretches are bridged by sample
+  anchors (`FluidDiarizer.anchors`), so its frame clock still lines up with the lane's. Off
+  (Settings ▸ Tell speakers apart ▸ Off) loads nothing: zero cost, no memory.
+- **Word attribution costs nothing extra**: the Unified speech model already records the encoder
+  frame at which it emitted each token (`consumeTokenTimings`); the tracker maps those onto the
+  diarizer's frames instead of estimating when a word was spoken from when it appeared.
+- **Enrolment** (the 10 s clip played into a new microphone-lane diarizer at every session start)
+  is ~21 Neural Engine calls, well under a second, once per session.
+
+Live app numbers (`top -l 2 -s 3`, Settings ▸ Tell speakers apart ▸ Microphone only, a clip of
+three voices through the speakers with echo cancellation off): see the table at the top; the
+diarizer's share could not be separated from the ±3% run-to-run variation of the speech model.
+
+Chosen model: Sortformer. On the synthetic three-voice clip (`say -v Samantha / Daniel / Karen`
+and, in a second variant, `Moira` as the third voice) all three FluidAudio diarizers found the
+same turn boundaries (within 80 ms of the clip's), but only Sortformer told the third voice
+(Moira) apart from the first; both LS-EEND variants (DIHARD III and AMI) merged her into
+Samantha's slot, and all three merged Karen into Samantha's (two similar synthetic female
+voices). Sortformer's slots are also stable across the session, which is what the labels need,
+and its enrolment recognised the enrolled voice as "me" when another voice spoke first
+(LS-EEND did too on that clip). Its limits: four slots per stream, and quiet or distant speech
+can be missed (it is trained to ignore background conversations). `defaults write
+dev.hearsay.app diarizer lseend` keeps the alternative available.
+
 ## Audio glitches
 
 Symptom: a YouTube video playing through the speakers froze for a moment whenever hearsay started,

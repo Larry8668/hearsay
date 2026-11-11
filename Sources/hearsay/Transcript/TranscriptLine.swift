@@ -11,24 +11,33 @@ struct TranscriptLine: Codable, Equatable, Sendable, Identifiable {
     var text: String
     /// Engine identifier that produced the line ("parakeet-eou-120m").
     var engine: String
+    /// Who spoke, when speakers are told apart (`SpeakerID`): the diarizer slot that dominated
+    /// the line's span. Nil when diarization is off or no slot was active.
+    var speakerID: String?
 }
 
 /// Who is talking, as the UI tells voices apart: a speaker plus, for "them", the app the sound
-/// came from. With per-app system audio two apps playing at once are two voices ("them · Zen",
-/// "them · Firefox") with their own partials and caption blocks.
+/// came from, plus the diarized speaker when there is one. With per-app system audio two apps
+/// playing at once are two voices ("them · Zen", "them · Firefox") with their own partials and
+/// caption blocks; with diarization on, so are two people on one lane ("me · Speaker 2").
 struct Voice: Hashable, Codable, Sendable {
     var speaker: Speaker
     var app: String?
+    var speakerID: String?
     static let me = Voice(speaker: .me)
-    init(speaker: Speaker, app: String? = nil) {
+    init(speaker: Speaker, app: String? = nil, speakerID: String? = nil) {
         self.speaker = speaker
         self.app = speaker == .me ? nil : app
+        self.speakerID = speakerID
     }
-    init(_ line: TranscriptLine) { self.init(speaker: line.speaker, app: line.sourceApp) }
-    /// me first, then them by app name, so lists never reorder.
+    init(_ line: TranscriptLine) { self.init(speaker: line.speaker, app: line.sourceApp, speakerID: line.speakerID) }
+    /// The audio stream this voice came from ("me", "them/us.zoom.xos"); its speakers share it.
+    var stream: String { SpeakerID.stream(speaker, app: app) }
+    /// me first, then them by app name, then speakers in id order, so lists never reorder.
     static func displayOrder(_ a: Voice, _ b: Voice) -> Bool {
         if a.speaker != b.speaker { return a.speaker == .me }
-        return (a.app ?? "") < (b.app ?? "")
+        if a.app != b.app { return (a.app ?? "") < (b.app ?? "") }
+        return (a.speakerID ?? "") < (b.speakerID ?? "")
     }
 }
 

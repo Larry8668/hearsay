@@ -7,6 +7,8 @@ struct TranscriptFormatter {
     var timeZone: TimeZone = .current
     /// "us.zoom.xos" → "Zoom". Defaults to the LaunchServices lookup in `AppNames`.
     var appName: (String) -> String = { AppNames.name(for: $0) }
+    /// Names for the lines' `speakerID`s ("Speaker 2", renamed ones); empty when speakers are not told apart.
+    var speakers = SpeakerRoster()
 
     // MARK: File naming
 
@@ -20,9 +22,9 @@ struct TranscriptFormatter {
 
     /// ```
     /// # Call transcript — Sun 9 Nov 2026, 14:03–14:41 (38 min)
-    /// _Apps heard: Zoom, Safari · Engine: parakeet-eou-120m · Made with hearsay, on this Mac._
+    /// _Speakers: me, Speaker 2 · Apps heard: Zoom, Safari · Engine: parakeet-eou-120m · Made with hearsay, on this Mac._
     ///
-    /// **14:03:12 me** So the deadline moves to Friday?
+    /// **14:03:12 Speaker 2** So the deadline moves to Friday?
     ///
     /// _— paused 4 min —_
     /// ```
@@ -31,6 +33,9 @@ struct TranscriptFormatter {
     func markdown(lines: [TranscriptLine], start: Date, end: Date?, engine: String, pauses: [PauseInterval] = []) -> String {
         var out = "# Call transcript — \(headerRange(start: start, end: end, pauses: pauses))\n"
         var meta: [String] = []
+        // Only worth a word once there is something to tell apart (a lone "me" is the default).
+        let names = speakers.displayNames
+        if names.count > 1 || !speakers.names.isEmpty { meta.append("Speakers: " + names.joined(separator: ", ")) }
         let apps = appsHeard(lines)
         if !apps.isEmpty { meta.append("Apps heard: " + apps.joined(separator: ", ")) }
         meta.append("Engine: \(engine)")
@@ -79,12 +84,15 @@ struct TranscriptFormatter {
         return "\(minutes / 60) h " + String(format: "%02d min", minutes % 60)
     }
 
-    /// "me", "them (Zoom)", or "them" when the app is unknown.
+    /// "me", "them (Zoom)", or "them" when the app is unknown; with speakers told apart
+    /// "Speaker 2", "them (Zoom) · Speaker 2" or the name the speaker was given.
     func label(_ line: TranscriptLine) -> String {
+        let base: String
         switch line.speaker {
-        case .me: return "me"
-        case .them: return line.sourceApp.map { "them (\(appName($0)))" } ?? "them"
+        case .me: base = "me"
+        case .them: base = line.sourceApp.map { "them (\(appName($0)))" } ?? "them"
         }
+        return speakers.label(line.speakerID, lane: line.speaker, base: base)
     }
 
     /// Distinct app names in order of first appearance.

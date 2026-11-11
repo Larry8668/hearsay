@@ -56,6 +56,10 @@ extension SessionController {
         guard lanes[s] === lane, !lane.stopping else { source.stop(); return }
         model.permissionDenied.remove(s)
         Log.info("lane \(s.rawValue): \(source.displayName) → \(engine.identifier)")
+        // The enrolled voice took a slot in this lane's diarizer: that speaker is "me".
+        for (_, id) in await DiarizerRegistry.shared.enrolledIDs() where model.speakers.names[id] == nil {
+            rename(speaker: id, to: "me")
+        }
         let meter = model.audio.meter, history = levelHistory, gate = lane.gate
         if model.phase == .paused {
             await engine.stop()   // started while pausing (a source toggled on): resume() opens it

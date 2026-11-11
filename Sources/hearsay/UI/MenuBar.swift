@@ -18,6 +18,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var toggleRecordingBar: () -> Void
         var setFontSize: (Double) -> Void
         var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
+        var setDiarization: (String) -> Void       // DiarizationMode raw value
+        var learnVoice: () -> Void
+        var forgetVoice: () -> Void
         var showWelcome: () -> Void
         var openLogs: () -> Void
         var openSettings: (Speaker) -> Void
@@ -47,6 +50,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var launchAtLogin = false
         var fontSize: Double = 13
         var echoCancellation = "auto"
+        var diarization = "microphone"
+        var voiceEnrolled = false
         var engine = ""
     }
 
@@ -73,6 +78,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let updateChecksItem = NSMenuItem()
     private let fontItem = NSMenuItem()
     private let echoItem = NSMenuItem()
+    private let diarizationItem = NSMenuItem()
+    private let learnVoiceItem = NSMenuItem()
+    private let forgetVoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
     var onMenuWillOpen: (() -> Void)?
@@ -173,6 +181,26 @@ final class MenuBar: NSObject, NSMenuDelegate {
         echo.addItem(note)
         echoItem.submenu = echo
         settings.addItem(echoItem)
+        diarizationItem.title = "Tell speakers apart"
+        let diarization = NSMenu()
+        for choice in DiarizationMode.allCases {
+            let mi = item(choice.title, #selector(chooseDiarization(_:)))
+            mi.representedObject = choice.rawValue
+            diarization.addItem(mi)
+        }
+        diarization.addItem(.separator())
+        let dnote = NSMenuItem(title: "Labels Speaker 1, 2… when several people share one source", action: nil, keyEquivalent: "")
+        dnote.isEnabled = false
+        diarization.addItem(dnote)
+        diarization.addItem(.separator())
+        learnVoiceItem.title = "Learn my voice…"
+        bind(learnVoiceItem, #selector(learnVoice))
+        diarization.addItem(learnVoiceItem)
+        forgetVoiceItem.title = "Forget my voice"
+        bind(forgetVoiceItem, #selector(forgetVoice))
+        diarization.addItem(forgetVoiceItem)
+        diarizationItem.submenu = diarization
+        settings.addItem(diarizationItem)
         fontItem.title = "Live panel font size"
         let fonts = NSMenu()
         for (size, name) in AppModel.fontChoices {
@@ -264,6 +292,12 @@ final class MenuBar: NSObject, NSMenuDelegate {
         loginItem.state = s.launchAtLogin ? .on : .off
         for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) / 10 == s.fontSize ? .on : .off }
         for mi in echoItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == s.echoCancellation ? .on : .off }
+        for mi in diarizationItem.submenu?.items ?? [] where mi.representedObject != nil {
+            mi.state = (mi.representedObject as? String) == s.diarization ? .on : .off
+        }
+        learnVoiceItem.title = s.voiceEnrolled ? "Learn my voice again…" : "Learn my voice…"
+        learnVoiceItem.isEnabled = !s.listening
+        forgetVoiceItem.isHidden = !s.voiceEnrolled
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
     }
 
@@ -308,6 +342,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
+    @objc private func chooseDiarization(_ sender: NSMenuItem) { actions.setDiarization(sender.representedObject as? String ?? "microphone") }
+    @objc private func learnVoice() { actions.learnVoice() }
+    @objc private func forgetVoice() { actions.forgetVoice() }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
     @objc private func relaunch() { actions.relaunch() }

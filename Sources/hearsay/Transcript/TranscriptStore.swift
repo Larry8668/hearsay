@@ -22,6 +22,8 @@ final class TranscriptStore {
     private(set) var lines: [TranscriptLine] = []
     /// Pauses in order; the last one is open (`end == nil`) while paused.
     private(set) var pauses: [PauseInterval] = []
+    /// Diarized speakers seen so far and their names (see SpeakerRoster).
+    private(set) var speakers = SpeakerRoster()
     let formatter: TranscriptFormatter
     /// Fixed at creation from `startedAt`; " 2", " 3"… appended if that minute is taken.
     let markdownURL: URL
@@ -70,6 +72,22 @@ final class TranscriptStore {
             if lines[mid].start <= start { lo = mid + 1 } else { hi = mid }
         }
         return lo
+    }
+
+    // MARK: Speakers
+
+    /// Records a diarized speaker id as soon as it is heard (partials included), so numbering
+    /// follows the order people first spoke.
+    func note(speaker id: String) {
+        guard speakers.note(id), !lines.isEmpty else { return }
+        scheduleWrite()
+    }
+
+    /// Gives a speaker a name ("Anna") that replaces "Speaker 2" in the files; an empty name
+    /// goes back to the number. The transcript is rewritten with the new labels.
+    func rename(speaker id: String, to name: String) {
+        speakers.rename(id, to: name)
+        if !lines.isEmpty { scheduleWrite() }
     }
 
     // MARK: Pauses
@@ -128,11 +146,13 @@ final class TranscriptStore {
 
     private struct Snapshot { var dir: URL; var md: URL; var json: URL; var markdown: String; var sidecar: Data }
 
-    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses? }`.
-    /// `pauses` is optional so sidecars written before pause existed still decode (same version).
+    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses?, speakers? }`.
+    /// `pauses` and `speakers` (speaker id → display name) are optional so sidecars written
+    /// before they existed still decode (same version).
     struct Sidecar: Codable {
         var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine]
         var pauses: [PauseInterval]?
+        var speakers: [String: String]?
     }
 
     /// ISO 8601 with milliseconds: whole seconds would lose the order of lines that start in the
@@ -166,8 +186,11 @@ final class TranscriptStore {
     }
 
     private func render() -> Snapshot {
-        let md = formatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses)
-        let side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        var f = formatter
+        f.speakers = speakers
+        let md = f.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses)
+        let side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses,
+                           speakers: speakers.isEmpty ? nil : speakers.map)
         let data = (try? TranscriptStore.jsonEncoder.encode(side)) ?? Data()
         return Snapshot(dir: directory, md: markdownURL, json: jsonURL, markdown: md, sidecar: data)
     }
@@ -184,7 +207,11 @@ final class TranscriptStore {
 
     // MARK: Exports and Finder
 
-    func plainText() -> String { formatter.plainText(lines: lines) }
+    func plainText() -> String {
+        var f = formatter
+        f.speakers = speakers
+        return f.plainText(lines: lines)
+    }
 
     func copyAll() {
         NSPasteboard.general.clearContents()
@@ -198,7 +225,9 @@ final class TranscriptStore {
         let url = markdownURL.deletingPathExtension().appendingPathExtension("srt")
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data(formatter.srt(lines: lines, start: startedAt).utf8).write(to: url, options: .atomic)
+            var f = formatter
+            f.speakers = speakers
+            try Data(f.srt(lines: lines, start: startedAt).utf8).write(to: url, options: .atomic)
             Log.info("transcript: exported \(url.lastPathComponent)")
             return url
         } catch {
