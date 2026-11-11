@@ -114,8 +114,9 @@ struct WelcomeView: View {
 
     private var modelNote: String {
         switch model.modelState {
-        case .notDownloaded: return "Downloaded once (a few hundred MB), stays on this Mac"
+        case .notDownloaded: return "Downloaded once (about 580 MB), stays on this Mac"
         case .downloading(let f): return f < 0 ? "Preparing…" : "Downloading \(Int(f * 100))% · stays on this Mac"
+        case .paused(let f): return f < 0 ? "Download paused" : "Download paused at \(Int(f * 100))% · resumes where it stopped"
         case .ready: return "Ready · \(model.engineID) · stays on this Mac"
         case .failed(let e): return "Failed: \(e)"
         }
@@ -123,11 +124,28 @@ struct WelcomeView: View {
 
     @ViewBuilder private var modelAccessory: some View {
         switch model.modelState {
-        case .downloading(let f) where f >= 0: ProgressView(value: f).frame(width: 110)
-        case .downloading, .notDownloaded: ProgressView().controlSize(.small)
+        case .downloading(let f):
+            HStack(spacing: 8) {
+                if f >= 0 { ProgressView(value: f).frame(width: 90) } else { ProgressView().controlSize(.small) }
+                smallButton("pause.fill", "Pause the download; it resumes from the same point") { model.actions.pauseDownload() }
+                smallButton("xmark", "Cancel and delete what was downloaded") { model.actions.cancelDownload() }
+            }
+        case .paused(let f):
+            HStack(spacing: 8) {
+                if f >= 0 { ProgressView(value: f).frame(width: 90).tint(.secondary) }
+                smallButton("play.fill", "Resume the download") { model.actions.resumeDownload() }
+                smallButton("xmark", "Cancel and delete what was downloaded") { model.actions.cancelDownload() }
+            }
+        case .notDownloaded:
+            Button("Download") { model.actions.resumeDownload() }.controlSize(.small)
         case .ready: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
         case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).font(.title3)
         }
+    }
+
+    private func smallButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).frame(width: 14) }
+            .controlSize(.small).help(help)
     }
 
     private func row<A: View>(symbol: String, tint: Color, title: String, note: String, @ViewBuilder accessory: () -> A) -> some View {

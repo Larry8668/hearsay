@@ -89,7 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exportSRT: { [weak self] in self?.exportSRT() },
             revealInFinder: { [weak self] in
                 if let store = self?.session.store { store.revealInFinder() } else { TranscriptStore.openFolder() }
-            })
+            },
+            pauseDownload: { [weak self] in self?.session.pauseDownload() },
+            resumeDownload: { [weak self] in self?.session.resumeDownload() },
+            cancelDownload: { [weak self] in self?.session.cancelDownload() })
         bar = RecordingBar(model: model, actions: RecordingBar.Actions(
             togglePause: { [weak self] in self?.session.togglePause() },
             stop: { [weak self] in self?.session.stop() },
