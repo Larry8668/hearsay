@@ -304,8 +304,15 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             "yourname": { [weak self] in self?.model.yourName = TranscriptMeta.cleanTitle(DebugSnapshot.scriptArgument) },
             "more": { [weak self] in
                 guard let self = self, let menu = self.moreMenu, let view = self.window?.contentView else { return }
-                menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 40, y: view.bounds.maxY - 4), in: view)
+                // A pop-up menu tracks modally. Opened from inside a main-queue block it would keep that
+                // block (and every later one: the next script step, the SIGTERM quit) waiting until it
+                // closes; a run-loop perform runs outside any GCD block, so the queue keeps draining.
+                RunLoop.main.perform {
+                    menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 40, y: view.bounds.maxY - 4), in: view)
+                }
             },
+            // Pop-up menus track modally; this closes one opened by "more" so a scripted run can go on.
+            "closemenu": { [weak self] in self?.moreMenu?.cancelTracking() },
             "export": { [weak self] in self?.exportTranscript() },
             "past": { [weak self] in
                 guard let self = self else { return }
