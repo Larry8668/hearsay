@@ -149,6 +149,7 @@ final class SessionController {
         model.startedAt = now
         model.lines = []
         model.partials = [:]
+        model.hiddenVoices = []     // a fresh session shows every voice again
         model.pausedTotal = 0
         model.pausedAt = nil
         model.permissionDenied = []

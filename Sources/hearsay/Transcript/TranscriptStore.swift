@@ -10,8 +10,11 @@ import AppKit
 ///
 /// Main thread only. File I/O happens on a private serial queue so it never blocks the UI.
 final class TranscriptStore {
+    /// `~/Documents/hearsay`. Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
+    /// elsewhere, so unattended runs never touch the user's own transcripts.
     static var defaultDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let dir = ProcessInfo.processInfo.environment["HEARSAY_TRANSCRIPTS_DIR"], !dir.isEmpty { return URL(fileURLWithPath: dir, isDirectory: true) }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("hearsay", isDirectory: true)
     }
 
@@ -184,21 +187,35 @@ final class TranscriptStore {
 
     // MARK: Exports and Finder
 
-    func plainText() -> String { formatter.plainText(lines: lines) }
+    /// `hiding`: voices the window has turned off; they stay in the files, out of the clipboard.
+    func plainText(hiding hidden: Set<Voice> = []) -> String { formatter.plainText(lines: lines.visible(hiding: hidden)) }
 
-    func copyAll() {
+    func copyAll(hiding hidden: Set<Voice> = []) {
+        TranscriptStore.copy(plainText(hiding: hidden))
+    }
+
+    static func copy(_ text: String) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(plainText(), forType: .string)
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// Writes `<name>.srt` next to the Markdown file and returns it.
     @discardableResult
-    func exportSRT() -> URL? {
+    func exportSRT(hiding hidden: Set<Voice> = []) -> URL? {
+        TranscriptStore.writeSRT(lines: lines.visible(hiding: hidden), start: startedAt,
+                                 nextTo: markdownURL, formatter: formatter)
+    }
+
+    /// `<transcript>.srt` beside the given transcript file; nil when there is nothing to write
+    /// or the write fails.
+    @discardableResult
+    static func writeSRT(lines: [TranscriptLine], start: Date, nextTo transcript: URL,
+                         formatter: TranscriptFormatter = TranscriptFormatter()) -> URL? {
         guard !lines.isEmpty else { return nil }
-        let url = markdownURL.deletingPathExtension().appendingPathExtension("srt")
+        let url = transcript.deletingPathExtension().appendingPathExtension("srt")
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data(formatter.srt(lines: lines, start: startedAt).utf8).write(to: url, options: .atomic)
+            try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(formatter.srt(lines: lines, start: start).utf8).write(to: url, options: .atomic)
             Log.info("transcript: exported \(url.lastPathComponent)")
             return url
         } catch {

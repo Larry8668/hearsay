@@ -41,7 +41,7 @@ Neural Engine, and saves a Markdown transcript when you stop.
 - **Light.** About 8% of one core while listening with headphones, 1% when idle.
 
 <p align="center">
-  <img src="docs/images/panel-dark.png" width="760" alt="The live transcript window">
+  <img src="docs/images/panel-dark.png" width="760" alt="The hearsay window with the live transcript">
 </p>
 
 ## Install
@@ -63,8 +63,8 @@ notarised). To build it yourself, see [Building from source](docs/BUILDING.md).
 1. **Open hearsay.** It downloads the speech model and asks for **Microphone** access.
 2. **Start listening** with ⌃⌥H or from the menu-bar waveform. The first time, macOS asks for
    **System Audio Recording**.
-3. **Talk.** The bar at the bottom shows live captions; the list button opens the full live
-   transcript. ⌃⌥P pauses.
+3. **Talk.** The bar at the bottom shows live captions; its list button opens the hearsay
+   window with the full live transcript, speaker toggles and every past transcript. ⌃⌥P pauses.
 4. **Stop** with ⌃⌥H. The transcript is in `~/Documents/hearsay`, as Markdown and JSON, with
    subtitles (SRT) one click away.
 
@@ -85,7 +85,7 @@ _Apps heard: Zoom · Engine: parakeet-unified-640ms · Made with hearsay, on thi
 
 ## Learn more
 
-- [Using hearsay](docs/USING.md): the bar, the live window, echo cancellation, several apps,
+- [Using hearsay](docs/USING.md): the bar, the main window, echo cancellation, several apps,
   pausing, the menu, privacy.
 - [Building from source](docs/BUILDING.md): toolchain, signing identity, dev aids.
 - [Performance](docs/PERFORMANCE.md): what it costs and why.

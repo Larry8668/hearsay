@@ -16,8 +16,13 @@ final class AppModel: ObservableObject {
     let audio = AudioLevels()
     /// Smoothed level per lane, 0…1 (−60…−10 dBFS), updated ≤30×/s while listening.
     var levels: [Speaker: Float] { audio.levels }
-    /// Mirrors the live panel's visibility (the recording bar's transcript button shows it).
+    /// True while the main window is showing the live transcript (the recording bar's transcript
+    /// button shows a filled icon then, and toggles the window).
     @Published var panelVisible = false
+    /// Voices turned off in the live view's speaker chips: their lines and partials are hidden
+    /// from the window and from its Copy / Export SRT. The files on disk always get every line.
+    /// Reset when a session starts.
+    @Published var hiddenVoices: Set<Voice> = []
     @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
     }
@@ -33,22 +38,23 @@ final class AppModel: ObservableObject {
     @Published var permissionDenied: Set<Speaker> = []
     @Published var micAuthorized = false
     @Published var fontSize: Double = AppModel.storedFontSize { didSet { UserDefaults.standard.set(fontSize, forKey: Self.fontKey) } }
-    @Published var pinned: Bool = UserDefaults.standard.object(forKey: AppModel.pinKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(pinned, forKey: Self.pinKey) }
-    }
 
+    /// What the windows can ask of the session. `copyAll` / `exportSRT` take the voices the view
+    /// is hiding, so the clipboard and the .srt match what is on screen.
     struct Actions {
         var toggleListening: () -> Void = {}
-        var copyAll: () -> Void = {}
+        var togglePause: () -> Void = {}
+        var stop: () -> Void = {}
+        var copyAll: (Set<Voice>) -> Void = { _ in }
         var requestMic: () -> Void = {}
         var openTranscript: () -> Void = {}
         var closeWelcome: () -> Void = {}
-        var exportSRT: () -> Void = {}
+        var exportSRT: (Set<Voice>) -> Void = { _ in }
         var revealInFinder: () -> Void = {}
     }
     var actions = Actions()
 
-    static let fontKey = "panelFontSize", pinKey = "panelPinned"
+    static let fontKey = "panelFontSize"
     static let barKey = "recordingBarShown"
     static let fontRange: ClosedRange<Double> = 10...28
     static let fontChoices: [(Double, String)] = [(12, "Small"), (14.5, "Medium"), (17, "Large"), (21, "Extra large")]
