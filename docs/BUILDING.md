@@ -80,6 +80,10 @@ the microphone and the system tap at once; each tap excludes only its own proces
   each window's frame to `frames.txt`, for stepping through an animation.
 - `HEARSAY_TRANSCRIPTS_DIR=/some/dir` makes the instance read and write its transcripts there
   instead of `~/Documents/hearsay` (unattended runs then leave the real folder alone).
+- `HEARSAY_MODELS_DIR=/some/dir` (dev mode only) makes ModelStore use that folder, so an empty one
+  shows the first-run "Choose your models" step without touching the installed app's models.
+  Script actions for it: `models` (Settings ▸ Models…), `download=<speech raw value>/<off|sortformer|lseend>`
+  (the chooser's Download), `pauseSpeaker` / `resumeSpeaker` / `cancelSpeaker`. `HEARSAY_APPEARANCE=light|dark` pins the look.
 - `HEARSAY_UI_SCRIPT="window@3,captions@10,pause@20"` runs those UI actions that many seconds after
   launch (`window`: open the main window, `panel`: toggle it on the live view as the bar's button
   does, `past`: select the newest saved transcript, `hideme`: toggle the "me" chip, `delete`: show

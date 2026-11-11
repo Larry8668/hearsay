@@ -1,4 +1,5 @@
 import AppKit
+import FluidAudio
 import SwiftUI
 
 /// Observable snapshot of app state for the SwiftUI views (live panel, welcome window).
@@ -53,6 +54,10 @@ final class AppModel: ObservableObject {
     @Published var engineID = ""
     /// The speaker diarizer's download / load, when "Tell speakers apart" is on.
     @Published var diarizerState: ModelState = .notDownloaded
+    /// The welcome window shows "Choose your models" and nothing downloads until Download is pressed.
+    @Published var chooserPending = false
+    /// This launch's download was started from the chooser (the welcome window then lists the speaker model's row too).
+    @Published var chosenThisRun = false
     /// Settings ▸ Tell speakers apart (persisted; SessionController applies it per lane).
     @Published var diarization: DiarizationMode = .current { didSet { DiarizationMode.current = diarization } }
     /// Diarized speakers of the current (or last) session, for chip labels and colours.
@@ -79,6 +84,13 @@ final class AppModel: ObservableObject {
         var pauseDownload: () -> Void = {}
         var resumeDownload: () -> Void = {}
         var cancelDownload: () -> Void = {}
+        /// The chooser's Download: store the picks, then fetch the speech model and the speaker model in turn.
+        var startModelDownload: (StreamingModelVariant, ModelCatalog.Speaker) -> Void = { _, _ in }
+        var pauseSpeakerDownload: () -> Void = {}
+        var resumeSpeakerDownload: () -> Void = {}
+        var cancelSpeakerDownload: () -> Void = {}
+        /// Settings ▸ Models…: make this the speech model, from the next session.
+        var useSpeechModel: (StreamingModelVariant) -> Void = { _ in }
         /// Title / tags / names for the live (or last) session: stored in its transcript files.
         var setLiveMeta: (TranscriptMeta) -> Void = { _ in }
         /// The session's transcript store (current, or the last one), for Export… of the live view.

@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 /// Owns the live session. Per enabled speaker a "lane" runs:
@@ -44,6 +45,13 @@ final class SessionController {
     /// Last download progress seen, so a pause can show "paused at 43%".
     private var downloadFraction: Double = -1
     private enum DownloadIntent { case pause, cancel }
+    /// Same for the speaker model's download, and its last progress for "paused at 43%".
+    private var diarizerIntent: DownloadIntent?
+    private var speakerFraction: Double = -1
+    /// Settings ▸ Models… chose another speech model while a session was running.
+    private var speechModelChangePending = false
+    /// Asks the app to show the welcome window (the chooser lives there).
+    var showWelcome: () -> Void = {}
     /// Set by pauseDownload / cancelDownload until the prepare task has reacted.
     private var downloadIntent: DownloadIntent?
     var warningToken = 0
@@ -113,16 +121,90 @@ final class SessionController {
 
     /// Downloads / loads the diarizer unless the mode is Off; progress lands in the status line.
     func prepareDiarizer() async {
+        diarizerIntent = nil
         let report: @Sendable (ModelState) -> Void = { [weak self] state in
             Task { @MainActor in
-                guard let self, self.model.diarizerState != state else { return }
+                // While a pause/cancel is in flight, the download's last ticks and its "failed" must not overwrite it.
+                guard let self, self.model.diarizerState != state, self.diarizerIntent == nil else { return }
+                if case .downloading(let f) = state, f >= 0 { self.speakerFraction = f }
                 self.model.diarizerState = state
                 self.onChange()
             }
         }
         do { try await DiarizerRegistry.shared.prepare(progress: report) } catch {
+            if let intent = diarizerIntent {
+                model.diarizerState = intent == .cancel ? .notDownloaded : .paused(fraction: speakerFraction)
+                onChange()
+                return
+            }
             showWarning("Speaker model unavailable: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: First-run chooser
+
+    /// The chooser's Download. Stores the picks (the same keys Settings and `defaults write` use),
+    /// then runs the usual launch path: the speech model first, and once it is ready the speaker
+    /// model (`prepareEngines` ends with `prepareDiarizer`). Nothing present on disk is fetched again.
+    func startChosenDownload(speech: StreamingModelVariant, speaker: ModelCatalog.Speaker) {
+        Prefs.store.set(speech.rawValue, forKey: ModelCatalog.engineKey)
+        if speaker == .off {
+            model.diarization = .off
+        } else {
+            Prefs.store.set(speaker.rawValue, forKey: ModelCatalog.diarizerKey)
+            if model.diarization == .off { model.diarization = .microphone }
+        }
+        Prefs.store.set(true, forKey: ModelCatalog.chosenKey)
+        Log.info(.model, "chooser: speech \(speech.rawValue), speakers \(speaker.rawValue)")
+        model.chooserPending = false
+        model.chosenThisRun = true
+        engines = [:]      // built from the stored variant by prepareEngines
+        Task { await DiarizerRegistry.shared.setMode(model.diarization) }
+        prepareEngines()
+        onChange()
+    }
+
+    /// Stops the speaker-model download, keeping partial files; `resumeSpeakerDownload` continues.
+    func pauseSpeakerDownload() {
+        diarizerIntent = .pause
+        Task { await ModelStore.shared.pauseDiarizerDownload(await DiarizerRegistry.shared.kind) }
+    }
+
+    func resumeSpeakerDownload() {
+        guard model.diarization != .off else { return }
+        Task { await prepareDiarizer() }
+    }
+
+    /// Cancels and deletes the partial download, and turns speakers off (the choice was "don't have it").
+    func cancelSpeakerDownload() {
+        diarizerIntent = .cancel
+        Task {
+            await ModelStore.shared.cancelDiarizerDownload(await DiarizerRegistry.shared.kind)
+            model.diarizerState = .notDownloaded
+            model.diarization = .off
+            await DiarizerRegistry.shared.setMode(.off)
+            onChange()
+        }
+    }
+
+    // MARK: Changing the speech model (Settings ▸ Models…)
+
+    /// Stores the choice; a session in progress keeps its engines, the next one gets the new model.
+    func useSpeechModel(_ variant: StreamingModelVariant) {
+        guard variant != ParakeetEngine.configuredVariant() else { return }
+        Prefs.store.set(variant.rawValue, forKey: ModelCatalog.engineKey)
+        Log.info(.model, "speech model set to \(variant.rawValue)")
+        speechModelChangePending = true
+        applySpeechModelChange()
+    }
+
+    private func applySpeechModelChange() {
+        guard speechModelChangePending, model.phase == .idle, prepareTask == nil else { return }
+        speechModelChangePending = false
+        engines = [:]
+        enginesReady = false
+        model.modelState = .notDownloaded
+        prepareEngines()
     }
 
     /// The enrolled voice took this diarized slot: label it "me" in the file and the live views.
@@ -138,7 +220,8 @@ final class SessionController {
     /// Creates both engines and prepares them (model download / load). Safe to call again after a
     /// failure (Start listening retries).
     func prepareEngines() {
-        guard prepareTask == nil, !enginesReady else { return }
+        // First run: nothing downloads until the welcome window's Download (startChosenDownload).
+        guard prepareTask == nil, !enginesReady, !model.chooserPending else { return }
         if engines.isEmpty {
             for s in Speaker.allCases { engines[s] = Wiring.makeEngine(for: s) }
             model.engineID = engines[.me]?.identifier ?? ""
@@ -213,8 +296,14 @@ final class SessionController {
             await ModelStore.shared.cancelDownload(variant)
             if prepareTask == nil {   // nothing was in flight (paused earlier): just report the clean state
                 model.modelState = .notDownloaded
-                onChange()
             }
+            // Nothing is left on disk: offer the choice again rather than a bare Download button.
+            if !ModelStore.isDownloaded(variant) {
+                Prefs.store.set(false, forKey: ModelCatalog.chosenKey)
+                model.chooserPending = true
+                model.chosenThisRun = false
+            }
+            onChange()
         }
     }
 
@@ -234,6 +323,11 @@ final class SessionController {
 
     func start() {
         guard model.phase == .idle else { return }
+        if model.chooserPending {
+            showWarning("Choose which models to download first.")
+            showWelcome()
+            return
+        }
         if !enginesReady {
             Log.info(.session, "start requested before the model is ready; will start when it is")
             startWhenReady = true
@@ -302,6 +396,7 @@ final class SessionController {
             model.audio.reset()
             model.phase = .idle
             stopTask = nil
+            applySpeechModelChange()
             onChange()
             Log.info(.session, "session: stopped")
             if let st = ended {
