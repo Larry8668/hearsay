@@ -14,10 +14,10 @@ struct MainContentView: View {
         Group {
             switch state.selection {
             case .live:
-                LiveContentView(model: model, firstRun: library.entries.isEmpty)
+                LiveContentView(model: model, state: state, firstRun: library.entries.isEmpty, tagSuggestions: library.allTags)
             case .transcript(let url):
                 if let doc = state.document, doc.entry.jsonURL == url {
-                    PastContentView(doc: doc, state: state, actions: actions)
+                    PastContentView(doc: doc, state: state, actions: actions, tagSuggestions: library.allTags)
                 } else {
                     ContentUnavailableView("Couldn't read this transcript", systemImage: "doc.questionmark",
                                            description: Text("The file may have been moved or isn't a hearsay sidecar."))
@@ -29,30 +29,56 @@ struct MainContentView: View {
     }
 }
 
-/// Title, one line of details, and the voice chips. 16 pt gutters, 8/12 vertical rhythm.
+/// Editable title (the date range or "Live transcript" until one is set), one line of details,
+/// the tag row and the voice chips (toggle, and rename in place). 16 pt gutters, 8/12 vertical
+/// rhythm. Edits come back as a whole `TranscriptMeta` through `save`; which editor is open
+/// lives in `editing` (`MainWindowState`), so one is open at a time.
 struct ContentHeader<Detail: View>: View {
-    let title: String
+    let meta: TranscriptMeta
+    /// The title line while there is no title.
+    let defaultTitle: String
     @ViewBuilder let detail: Detail
     let voices: [Voice]
     let hidden: Set<Voice>
+    let names: VoiceNames
+    /// Tags used across the library, for the tag field's suggestions.
+    let tagSuggestions: [String]
+    @Binding var editing: MetaEditing?
     let toggle: (Voice) -> Void
     let showAll: () -> Void
+    let save: (TranscriptMeta) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                TitleEditor(title: meta.title, placeholder: defaultTitle, editing: open(.title)) { t in
+                    var m = meta; m.setTitle(t); save(m)
+                }
                 detail.font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                TagRow(tags: meta.tags, suggestions: tagSuggestions, adding: open(.tag)) { t in
+                    var m = meta; m.setTags(t); save(m)
+                }
             }
             if !voices.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    VoiceFilterBar(voices: voices, hidden: hidden, toggle: toggle, showAll: showAll)
+                    VoiceFilterBar(voices: voices, hidden: hidden, names: names, renaming: renaming,
+                                   toggle: toggle, showAll: showAll, rename: { v, n in var m = meta; m.setName(n, for: v); save(m) })
                 }
-                .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
+    }
+
+    private func open(_ which: MetaEditing) -> Binding<Bool> {
+        Binding(get: { editing == which }, set: { editing = $0 ? which : (editing == which ? nil : editing) })
+    }
+
+    private var renaming: Binding<Voice?> {
+        Binding(get: { if case .rename(let v) = editing { return v } else { return nil } },
+                set: { v in if let v = v { editing = .rename(v) } else if case .rename = editing { editing = nil } })
     }
 }
 
@@ -60,7 +86,11 @@ struct ContentHeader<Detail: View>: View {
 /// heard so far. Follows new lines; the hidden voices come from `model.hiddenVoices`.
 struct LiveContentView: View {
     @ObservedObject var model: AppModel
+    /// Only its `editing` is used here (the header's open editor); the view already re-renders
+    /// with `model`, so observing `state` too costs nothing extra.
+    @ObservedObject var state: MainWindowState
     let firstRun: Bool
+    let tagSuggestions: [String]
 
     private var voices: [Voice] {
         Array(Set(model.lines.map { Voice($0) }).union(model.partials.keys)).sorted(by: Voice.displayOrder)
@@ -68,24 +98,29 @@ struct LiveContentView: View {
 
     var body: some View {
         let hidden = model.hiddenVoices
+        let names = model.liveNames
         VStack(spacing: 0) {
-            ContentHeader(title: "Live transcript", detail: {
-                if model.startedAt != nil {
-                    // Ticks once a second; only this text re-renders.
-                    TimelineView(.periodic(from: .now, by: 1)) { ctx in Text(details(now: ctx.date)) }
+            ContentHeader(meta: model.liveMeta, defaultTitle: "Live transcript", detail: {
+                if let start = model.startedAt {
+                    // Ticks once a second; only this text re-renders. Anchored to the session's
+                    // start, not `.now`: this body re-runs on every partial, and a schedule
+                    // re-created from `.now` each time re-phased the tick (the clock stuttered).
+                    TimelineView(.periodic(from: start, by: 1)) { ctx in Text(details(now: ctx.date)) }
                 } else {
                     Text("Not listening · press \(Hotkey.toggleListening.display) to start")
                 }
-            }, voices: voices, hidden: hidden,
+            }, voices: voices, hidden: hidden, names: names, tagSuggestions: tagSuggestions, editing: $state.editing,
                toggle: { v in if model.hiddenVoices.contains(v) { model.hiddenVoices.remove(v) } else { model.hiddenVoices.insert(v) } },
-               showAll: { model.hiddenVoices = [] })
+               showAll: { model.hiddenVoices = [] },
+               save: { model.actions.setLiveMeta($0) })
             Divider()
+            WarningRow(warning: model.warning, denied: model.permissionDenied)
             if model.lines.isEmpty && model.partials.isEmpty {
                 if firstRun && model.phase == .idle { FirstRunEmptyState(model: model) } else { LiveEmptyState(model: model) }
             } else {
                 TranscriptView(lines: model.lines.visible(hiding: hidden),
                                partials: model.partials.filter { !hidden.contains($0.key) },
-                               fontSize: model.fontSize, follow: true)
+                               fontSize: model.fontSize, follow: true, names: names)
             }
         }
     }
@@ -110,14 +145,18 @@ struct PastContentView: View {
     let doc: TranscriptLibrary.Document
     @ObservedObject var state: MainWindowState
     let actions: MainWindow.ContentActions
+    let tagSuggestions: [String]
 
     var body: some View {
         let e = doc.entry
         let hidden = state.hidden(for: e.jsonURL)
+        let names = VoiceNames(doc.meta, yourName: state.yourName, roster: doc.speakers)
         VStack(spacing: 0) {
-            ContentHeader(title: TranscriptFormatter().dateRange(start: e.startedAt, end: e.endedAt),
-                          detail: { Text(details) }, voices: doc.lines.voices, hidden: hidden,
-                          toggle: { state.toggle($0, for: e.jsonURL) }, showAll: { state.hiddenPast[e.jsonURL] = [] })
+            ContentHeader(meta: doc.meta, defaultTitle: TranscriptFormatter().dateRange(start: e.startedAt, end: e.endedAt),
+                          detail: { Text(details) }, voices: doc.lines.voices, hidden: hidden, names: names,
+                          tagSuggestions: tagSuggestions, editing: $state.editing,
+                          toggle: { state.toggle($0, for: e.jsonURL) }, showAll: { state.hiddenPast[e.jsonURL] = [] },
+                          save: { state.setMeta($0) })
             Divider()
             if state.confirmingDelete {
                 deleteRow(e)
@@ -126,15 +165,17 @@ struct PastContentView: View {
             if doc.lines.isEmpty {
                 ContentUnavailableView("Nothing was said", systemImage: "captions.bubble")
             } else {
-                TranscriptView(lines: doc.lines.visible(hiding: hidden), pauses: doc.pauses, fontSize: state.fontSize)
+                TranscriptView(lines: doc.lines.visible(hiding: hidden), pauses: doc.pauses, fontSize: state.fontSize, names: names)
             }
         }
     }
 
-    /// "38 min, 4 min paused · 48 lines · Apps heard: Zoom, Chrome · parakeet-unified-640ms"
+    /// "38 min, 4 min paused · 48 lines · Apps heard: Zoom, Chrome · parakeet-unified-640ms";
+    /// led by the date range once a title has taken its place on the line above.
     private var details: String {
         let e = doc.entry
         var parts: [String] = []
+        if doc.meta.title != nil { parts.append(TranscriptFormatter().dateRange(start: e.startedAt, end: e.endedAt)) }
         if let end = e.endedAt { parts.append(TranscriptFormatter().lengthText(start: e.startedAt, end: end, pauses: doc.pauses)) }
         else { parts.append("unfinished · " + TranscriptFormatter.duration(e.duration)) }
         parts.append("\(e.lineCount) line\(e.lineCount == 1 ? "" : "s")")
@@ -186,7 +227,7 @@ struct SessionControl: View {
                 HStack(spacing: 6) {
                     Circle().fill(state.phase == .paused ? Color(red: 1, green: 0.66, blue: 0.1) : Color(red: 1, green: 0.27, blue: 0.23))
                         .frame(width: 7, height: 7)
-                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    TimelineView(.periodic(from: model.startedAt ?? .now, by: 1)) { ctx in
                         Text(RecordingBarView.clock(model.listeningTime(now: ctx.date)))
                             .font(.system(size: 12, weight: .medium).monospacedDigit())
                     }

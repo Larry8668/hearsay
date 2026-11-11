@@ -23,8 +23,18 @@ final class AppModel: ObservableObject {
     /// from the window and from its Copy / Export SRT. The files on disk always get every line.
     /// Reset when a session starts.
     @Published var hiddenVoices: Set<Voice> = []
-    @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
+    /// Title, tags and voice names of the current (or last) session, mirrored from its
+    /// `TranscriptStore` so the window can show and edit them; `actions.setLiveMeta` writes
+    /// them through. Reset when a session starts.
+    @Published var liveMeta = TranscriptMeta()
+    /// Settings ▸ Your name: the default label for "me" everywhere until a transcript renames it.
+    @Published var yourName: String? = VoiceNames.storedYourName {
+        didSet { VoiceNames.storedYourName = yourName }
+    }
+    /// What the live views and the captions call each voice right now.
+    var liveNames: VoiceNames { VoiceNames(liveMeta, yourName: yourName, roster: speakers) }
+    @Published var showRecordingBar: Bool = Prefs.store.object(forKey: AppModel.barKey) as? Bool ?? true {
+        didSet { Prefs.store.set(showRecordingBar, forKey: Self.barKey) }
     }
     /// The recording bar's shape: the full bar with captions, or a small pill with just the
     /// controls that can sit anywhere (its spot is remembered separately).
@@ -32,8 +42,8 @@ final class AppModel: ObservableObject {
         case full, pill
         var title: String { self == .full ? "Full bar with captions" : "Small pill" }
     }
-    @Published var barMode: BarMode = BarMode(rawValue: UserDefaults.standard.string(forKey: AppModel.barModeKey) ?? "") ?? .full {
-        didSet { UserDefaults.standard.set(barMode.rawValue, forKey: Self.barModeKey) }
+    @Published var barMode: BarMode = BarMode(rawValue: Prefs.store.string(forKey: AppModel.barModeKey) ?? "") ?? .full {
+        didSet { Prefs.store.set(barMode.rawValue, forKey: Self.barModeKey) }
     }
     /// Committed lines of the current (or last) session, sorted by start time.
     @Published var lines: [TranscriptLine] = []
@@ -41,12 +51,18 @@ final class AppModel: ObservableObject {
     @Published var partials: [Voice: String] = [:]
     @Published var modelState: ModelState = .notDownloaded
     @Published var engineID = ""
+    /// The speaker diarizer's download / load, when "Tell speakers apart" is on.
+    @Published var diarizerState: ModelState = .notDownloaded
+    /// Settings ▸ Tell speakers apart (persisted; SessionController applies it per lane).
+    @Published var diarization: DiarizationMode = .current { didSet { DiarizationMode.current = diarization } }
+    /// Diarized speakers of the current (or last) session, for chip labels and colours.
+    @Published var speakers = SpeakerRoster()
     /// Last engine/source warning, cleared after a while.
     @Published var warning: String?
     /// Sources that failed with `permissionDenied` on the last start.
     @Published var permissionDenied: Set<Speaker> = []
     @Published var micAuthorized = false
-    @Published var fontSize: Double = AppModel.storedFontSize { didSet { UserDefaults.standard.set(fontSize, forKey: Self.fontKey) } }
+    @Published var fontSize: Double = AppModel.storedFontSize { didSet { Prefs.store.set(fontSize, forKey: Self.fontKey) } }
 
     /// What the windows can ask of the session. `copyAll` / `exportSRT` take the voices the view
     /// is hiding, so the clipboard and the .srt match what is on screen.
@@ -63,6 +79,10 @@ final class AppModel: ObservableObject {
         var pauseDownload: () -> Void = {}
         var resumeDownload: () -> Void = {}
         var cancelDownload: () -> Void = {}
+        /// Title / tags / names for the live (or last) session: stored in its transcript files.
+        var setLiveMeta: (TranscriptMeta) -> Void = { _ in }
+        /// The session's transcript store (current, or the last one), for Export… of the live view.
+        var liveStore: () -> TranscriptStore? = { nil }
     }
     var actions = Actions()
 
@@ -71,7 +91,7 @@ final class AppModel: ObservableObject {
     static let fontRange: ClosedRange<Double> = 10...28
     static let fontChoices: [(Double, String)] = [(12, "Small"), (14.5, "Medium"), (17, "Large"), (21, "Extra large")]
     private static var storedFontSize: Double {
-        let v = UserDefaults.standard.double(forKey: fontKey)
+        let v = Prefs.store.double(forKey: fontKey)
         return v == 0 ? 14.5 : min(max(v, fontRange.lowerBound), fontRange.upperBound)
     }
 
@@ -97,8 +117,11 @@ final class AppModel: ObservableObject {
             let what = f < 0 ? "Preparing speech model…" : "Downloading model \(Int(f * 100))%"
             return phase == .starting ? what + " · will start when ready" : what
         case .paused(let f): return "Model download paused\(f >= 0 ? " at \(Int(f * 100))%" : "") · Start listening resumes it"
-        case .failed: return "Speech model unavailable"
+        case .failed: return "Speech model unavailable · Start listening tries again"
         default: break
+        }
+        if case .downloading(let f) = diarizerState {
+            return f < 0 ? "Preparing speaker model…" : "Downloading speaker model \(Int(f * 100))%"
         }
         switch phase {
         case .idle: return "Not listening"
@@ -116,10 +139,11 @@ final class AppModel: ObservableObject {
         clearPartial(for: line)
     }
 
-    /// Drops the in-progress text the line replaces: its voice, and for "them" also the entry
-    /// that had no app yet (the app is a running vote, so a partial can precede its label).
+    /// Drops the in-progress text the line replaces: every voice of its stream (a stream has one
+    /// hypothesis at a time, whichever speaker it was attributed to), and for "them" also the
+    /// entry that had no app yet (the app is a running vote, so a partial can precede its label).
     func clearPartial(for line: TranscriptLine) {
-        partials[Voice(line)] = nil
+        for v in partials.keys where v.speaker == line.speaker && v.app == line.sourceApp { partials[v] = nil }
         if line.speaker == .them { partials[Voice(speaker: .them)] = nil }
     }
 
@@ -134,5 +158,12 @@ final class AppModel: ObservableObject {
     func discardPartial(_ v: Voice) {
         partials[v] = nil
         discards[v, default: 0] += 1
+    }
+
+    /// `discardPartial` for every voice of a lane (with speakers told apart, the mic lane's
+    /// hypothesis may be filed under any of its speakers).
+    func discardPartials(_ s: Speaker) {
+        let voices = Set(partials.keys.filter { $0.speaker == s }).union(s == .me ? [Voice.me] : [])
+        for v in voices { discardPartial(v) }
     }
 }

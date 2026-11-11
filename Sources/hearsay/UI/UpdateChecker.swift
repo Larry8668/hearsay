@@ -22,8 +22,8 @@ final class UpdateChecker {
     private let defaultsKey = "checkForUpdates"
 
     var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
+        get { Prefs.store.object(forKey: defaultsKey) as? Bool ?? true }
+        set { Prefs.store.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
     }
 
     static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0" }
@@ -53,20 +53,28 @@ final class UpdateChecker {
             let result: Status
             if let error = error {
                 result = .failed(error.localizedDescription)
-            } else if let data = data, (resp as? HTTPURLResponse)?.statusCode == 200,
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let tag = obj["tag_name"] as? String {
-                let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-                result = UpdateChecker.isNewer(latest, than: UpdateChecker.currentVersion) ? .available(latest) : .upToDate(latest)
             } else {
-                result = .failed("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+                result = UpdateChecker.interpret(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, body: data,
+                                                 current: UpdateChecker.currentVersion)
             }
             DispatchQueue.main.async {
                 self?.status = result
-                Log.info("update check: \(result)")
+                Log.info(.update, "update check: \(result)")
                 self?.onChange?()
             }
         }.resume()
+    }
+
+    /// The outcome of one `releases/latest` reply. 404 is GitHub's answer for a repository with
+    /// no release yet (a fresh public repo, a fork): nothing newer exists, so that is "up to
+    /// date", not an error worth a line in the menu.
+    static func interpret(status: Int, body: Data?, current: String) -> Status {
+        if status == 404 { return .upToDate(current) }
+        guard status == 200 else { return .failed("HTTP \(status)") }
+        guard let body = body, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let tag = obj["tag_name"] as? String else { return .failed("unexpected reply") }
+        let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        return isNewer(latest, than: current) ? .available(latest) : .upToDate(latest)
     }
 
     /// Numeric dotted-version comparison ("0.1.10" > "0.1.9").
@@ -96,10 +104,10 @@ final class UpdateChecker {
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-            Log.info("update: opening \(url.path) in Terminal")
+            Log.info(.update, "update: opening \(url.path) in Terminal")
             NSWorkspace.shared.open(url)
         } catch {
-            Log.error("update: could not write script: \(error)")
+            Log.error(.update, "update: could not write script: \(error)")
             copyCommand()
         }
     }

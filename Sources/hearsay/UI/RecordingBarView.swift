@@ -123,7 +123,7 @@ private struct BarControls: View {
     }
 
     private var elapsed: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { ctx in
+        TimelineView(.periodic(from: model.startedAt ?? .now, by: 1)) { ctx in
             Group {
                 if paused {
                     Text("Paused").foregroundStyle(Self.amber)

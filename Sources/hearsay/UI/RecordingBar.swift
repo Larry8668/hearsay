@@ -70,7 +70,7 @@ final class RecordingBar: NSObject {
         self.actions = actions
         mode = model.barMode
         super.init()
-        state.captions = UserDefaults.standard.object(forKey: Self.captionsKey) as? Bool ?? true
+        state.captions = Prefs.store.object(forKey: Self.captionsKey) as? Bool ?? true
         // Only real changes reach the SwiftUI trees (see RecordingBarState).
         model.$phase.removeDuplicates().sink { [weak self] in self?.state.phase = $0 }.store(in: &subs)
         model.$panelVisible.removeDuplicates().sink { [weak self] in self?.state.panelVisible = $0 }.store(in: &subs)
@@ -94,7 +94,7 @@ final class RecordingBar: NSObject {
     /// truth: writing it brings `apply(mode:)` round.
     func setMode(_ m: Mode) {
         guard m != model.barMode else { return }
-        Log.info("recording bar: \(m.rawValue)")
+        Log.info(.ui, "recording bar: \(m.rawValue)")
         model.barMode = m
     }
 
@@ -121,7 +121,7 @@ final class RecordingBar: NSObject {
         p.setFrame(start, display: false)
         p.alphaValue = 0
         p.orderFrontRegardless()
-        Log.info("recording \(m.rawValue) shown at \(Int(target.midX)),\(Int(target.minY + Self.margin))")
+        Log.info(.ui, "recording \(m.rawValue) shown at \(Int(target.midX)),\(Int(target.minY + Self.margin))")
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = slide ? 0.5 : 0.25
             // y control point > 1 overshoots a little: a cheap spring for a window frame.
@@ -159,7 +159,7 @@ final class RecordingBar: NSObject {
             guard let self = self, !(self.wantVisible && self.mode == m) else { return }
             p.orderOut(nil)
             p.alphaValue = 0
-            Log.info("recording \(m.rawValue) hidden")
+            Log.info(.ui, "recording \(m.rawValue) hidden")
         }
     }
 
@@ -169,6 +169,7 @@ final class RecordingBar: NSObject {
                                   backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.hidesOnDeactivate = false          // accessory apps are "inactive" almost always
+        p.canHide = false                    // ⌘H (Hide hearsay) must not take the bar off a call
         // .statusBar sits above full-screen apps when combined with .fullScreenAuxiliary (what
         // worked for sharemask's HUD); .floating would hide behind a full-screen Zoom.
         p.level = .statusBar
@@ -226,8 +227,8 @@ final class RecordingBar: NSObject {
     /// rule is why the pill is a second window rather than the bar shrinking.
     func toggleCaptions() {
         let on = !state.captions
-        Log.info("recording bar: captions \(on ? "shown" : "hidden")")
-        UserDefaults.standard.set(on, forKey: Self.captionsKey)
+        Log.info(.ui, "recording bar: captions \(on ? "shown" : "hidden")")
+        Prefs.store.set(on, forKey: Self.captionsKey)
         withAnimation(on ? .easeOut(duration: 0.25) : .easeIn(duration: 0.2)) { state.captions = on }
     }
 
@@ -250,7 +251,7 @@ final class RecordingBar: NSObject {
     /// of the main screen, just above the Dock. The pill may hug a screen's left or right edge,
     /// so only its middle has to be on screen; the bar keeps 40 pt of itself on.
     private func anchor(for m: Mode) -> NSPoint {
-        if let key = Self.anchorKeys[m], let a = UserDefaults.standard.array(forKey: key) as? [Double], a.count == 2 {
+        if let key = Self.anchorKeys[m], let a = Prefs.store.array(forKey: key) as? [Double], a.count == 2 {
             let pt = NSPoint(x: a[0], y: a[1])
             let dx: CGFloat = m == .full ? 40 : 0
             if NSScreen.screens.contains(where: { $0.visibleFrame.insetBy(dx: dx, dy: -1).contains(pt) }) { return pt }
@@ -283,15 +284,15 @@ final class RecordingBar: NSObject {
     private func saveAnchor(_ m: Mode) {
         guard let p = panels[m], let key = Self.anchorKeys[m] else { return }
         let a = NSPoint(x: p.frame.midX, y: p.frame.minY + Self.margin)
-        UserDefaults.standard.set([Double(a.x), Double(a.y)], forKey: key)
-        Log.info("recording \(m.rawValue) moved to \(Int(a.x)),\(Int(a.y))")
+        Prefs.store.set([Double(a.x), Double(a.y)], forKey: key)
+        Log.info(.ui, "recording \(m.rawValue) moved to \(Int(a.x)),\(Int(a.y))")
     }
 
     /// Double-click on the background: forget the dragged spot, back to bottom-centre.
     private func snapBack(_ m: Mode) {
         userDragAt = nil
         saveWork?.cancel()
-        if let key = Self.anchorKeys[m] { UserDefaults.standard.removeObject(forKey: key) }
+        if let key = Self.anchorKeys[m] { Prefs.store.removeObject(forKey: key) }
         guard let p = panels[m] else { return }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.3

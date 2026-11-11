@@ -3,9 +3,10 @@ import os
 
 /// Logging façade. Every line goes to three places so problems can be reconstructed after the fact:
 ///
-/// 1. **File**: `~/Library/Logs/hearsay/hearsay.log` (append; rotated at 5 MB to `.1`, the
-///    previous `.1` is deleted, so disk use is capped at ~10 MB). Survives relaunches and crashes;
-///    readable with `tail -f` or Console.app.
+/// 1. **File**: `~/Library/Logs/hearsay/hearsay.log` (`hearsay-dev.log` in dev mode), append; rolled
+///    at 5 MB to `.1` (newest) … `.3` (oldest), so disk use is capped at ~20 MB per flavour and
+///    rolled files older than 30 days are deleted. Survives relaunches and crashes; readable
+///    with `tail -f` or Console.app. Lines read `time [LEVEL] [category] message`.
 /// 2. **Unified log**: subsystem `dev.hearsay.app` at notice/error level (info-level entries are
 ///    NOT persisted by macOS, so we never log below notice).
 ///    `/usr/bin/log show --last 1h --info --predicate 'subsystem == "dev.hearsay.app"'`
@@ -13,7 +14,10 @@ import os
 ///
 /// Uncaught exceptions and fatal signals write a final line before the process dies.
 enum Log {
-    private static let logger = Logger(subsystem: "dev.hearsay.app", category: "app")
+    enum Category: String, CaseIterable { case mic, tap, engine, session, ui, update, model, diarize, app }
+
+    private static let loggers: [Category: Logger] = Dictionary(uniqueKeysWithValues:
+        Category.allCases.map { ($0, Logger(subsystem: "dev.hearsay.app", category: $0.rawValue)) })
     private static let stderrIsTTY = isatty(STDERR_FILENO) != 0
     private static let verbose = ProcessInfo.processInfo.environment["HEARSAY_VERBOSE"] != nil
     private static let queue = DispatchQueue(label: "hearsay.log", qos: .utility)
@@ -21,13 +25,48 @@ enum Log {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"; return f
     }()
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/hearsay", isDirectory: true)
-    static let fileURL = directory.appendingPathComponent("hearsay.log")
+    static let fileURL = directory.appendingPathComponent(DevMode.logFileName)
     private static let maxBytes = 5 * 1024 * 1024
+    /// Rolled copies kept next to the live file (`.1` newest … `.3` oldest).
+    static let rolledCount = 3
+    static let maxRolledAge: TimeInterval = 30 * 24 * 3600
     private static var handle: FileHandle?
 
-    static func info(_ message: String) { emit("INFO", message); logger.notice("\(message, privacy: .public)") }
-    static func warn(_ message: String) { emit("WARN", message); logger.warning("\(message, privacy: .public)") }
-    static func error(_ message: String) { emit("ERROR", message); logger.error("\(message, privacy: .public)") }
+    static func info(_ message: String) { info(.app, message) }
+    static func warn(_ message: String) { warn(.app, message) }
+    static func error(_ message: String) { error(.app, message) }
+    static func info(_ c: Category, _ message: String) { emit("INFO", c, message); loggers[c]?.notice("\(message, privacy: .public)") }
+    static func warn(_ c: Category, _ message: String) { emit("WARN", c, message); loggers[c]?.warning("\(message, privacy: .public)") }
+    static func error(_ c: Category, _ message: String) { emit("ERROR", c, message); loggers[c]?.error("\(message, privacy: .public)") }
+
+    /// Settings: Troubleshooting ▸ "Verbose logging (includes transcript text)". Off by default; while
+    /// off, nothing that was spoken reaches the log (only lengths and word counts).
+    static let verboseKey = "verboseLogging"
+    static var verboseText: Bool {
+        get { Prefs.store.bool(forKey: verboseKey) }
+        set { Prefs.store.set(newValue, forKey: verboseKey); info(.app, "verbose logging \(newValue ? "on (transcript text is logged)" : "off")") }
+    }
+
+    /// How to mention spoken text in a log line: the (trimmed) text when verbose, else its size.
+    static func describe(text: String, verbose: Bool = verboseText) -> String {
+        if verbose { return "\"\(text.prefix(60))\"" }
+        return "\(text.split(whereSeparator: \.isWhitespace).count) words, \(text.count) chars"
+    }
+
+    /// `2026-11-12 10:03:12.345 [INFO] [engine] message`
+    static func format(date: Date, level: String, category: Category, message: String) -> String {
+        "\(formatter.string(from: date)) [\(level)] [\(category.rawValue)] \(message)\n"
+    }
+
+    static func sessionStartLine(at date: Date, sources: [String], engine: String, echo: String) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return "===== session start \(f.string(from: date)) · sources \(sources.joined(separator: "+")) · engine \(engine) · echo \(echo) ====="
+    }
+
+    static func sessionEndLine(duration: TimeInterval, lines: Int, saved: String?) -> String {
+        let d = duration < 90 ? "\(Int(duration.rounded())) s" : "\(Int((duration / 60).rounded())) min"
+        return "===== session end · \(d) · \(lines) lines · saved \(saved ?? "nothing (no speech)") ====="
+    }
 
     /// Call once at launch: opens the file, logs a session header, installs crash hooks.
     static func start(role: String) {
@@ -38,8 +77,8 @@ enum Log {
         installCrashHooks()
     }
 
-    private static func emit(_ level: String, _ message: String) {
-        let line = "\(formatter.string(from: Date())) [\(level)] \(message)\n"
+    private static func emit(_ level: String, _ category: Category, _ message: String) {
+        let line = format(date: Date(), level: level, category: category, message: message)
         if stderrIsTTY || verbose { FileHandle.standardError.write(line.data(using: .utf8)!) }
         queue.async { writeLine(line) }
     }
@@ -60,20 +99,38 @@ enum Log {
         if h.offsetInFile > maxBytes { rotate() }
     }
 
-    /// Removes anything in the log folder other than the two files we manage (older layouts, crash
-    /// dumps copied there by hand, …) so the folder can never grow unbounded.
-    private static func pruneStrays() {
-        guard let items = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
-        for url in items where !["hearsay.log", "hearsay.log.1"].contains(url.lastPathComponent) {
-            try? FileManager.default.removeItem(at: url)
+    /// Every log file either flavour (installed / dev) keeps: the base name plus its rolled copies.
+    /// Pruning must spare the other flavour's files, since both apps share this folder.
+    static func managedNames(baseNames: [String] = DevMode.logBaseNames, rolled: Int = rolledCount) -> Set<String> {
+        Set(baseNames.flatMap { base in [base] + (1...max(rolled, 1)).map { "\(base).\($0)" } })
+    }
+    static let managedFileNames = managedNames()
+
+    /// Removes anything in the log folder other than the files we manage (older layouts, crash
+    /// dumps copied there by hand, …) and rolled files older than 30 days, so the folder can never
+    /// grow unbounded. The live files are never age-pruned.
+    static func prune(in dir: URL, now: Date = Date(), baseNames: [String] = DevMode.logBaseNames) {
+        let keep = managedNames(baseNames: baseNames)
+        let items = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for url in items {
+            let name = url.lastPathComponent
+            var remove = !keep.contains(name)
+            if !remove, !baseNames.contains(name),
+               let m = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+               now.timeIntervalSince(m) > maxRolledAge { remove = true }
+            if remove { try? FileManager.default.removeItem(at: url) }
         }
     }
 
+    private static func pruneStrays() { prune(in: directory) }
+
     private static func rotate() {
         handle?.closeFile(); handle = nil
-        let old = directory.appendingPathComponent("hearsay.log.1")
-        try? FileManager.default.removeItem(at: old)
-        try? FileManager.default.moveItem(at: fileURL, to: old)
+        let fm = FileManager.default
+        func rolled(_ n: Int) -> URL { directory.appendingPathComponent("\(DevMode.logFileName).\(n)") }
+        try? fm.removeItem(at: rolled(rolledCount))
+        for n in stride(from: rolledCount - 1, through: 1, by: -1) { try? fm.moveItem(at: rolled(n), to: rolled(n + 1)) }
+        try? fm.moveItem(at: fileURL, to: rolled(1))
         openFile()
     }
 

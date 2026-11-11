@@ -26,7 +26,7 @@ enum VoiceProcessingPark {
         queue.async {
             releaseLocked(reason: "replaced")
             parked = Parked(engine: engine, input: input, output: output, since: Date())
-            Log.info("mic: voice processing parked for reuse (releasing it now would stutter playback)")
+            Log.info(.mic, "mic: voice processing parked for reuse (releasing it now would stutter playback)")
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + 5, repeating: 5, leeway: .seconds(1))
             t.setEventHandler {
@@ -57,7 +57,7 @@ enum VoiceProcessingPark {
         timer?.cancel(); timer = nil
         guard parked != nil else { return }
         parked = nil   // the engine deinit disposes the voice-processing unit
-        Log.info("mic: voice processing released (\(reason))")
+        Log.info(.mic, "mic: voice processing released (\(reason))")
     }
 
     /// Some process is doing IO on the device (playing, or holding the output open).

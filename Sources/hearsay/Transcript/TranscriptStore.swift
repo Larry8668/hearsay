@@ -10,12 +10,11 @@ import AppKit
 ///
 /// Main thread only. File I/O happens on a private serial queue so it never blocks the UI.
 final class TranscriptStore {
-    /// `~/Documents/hearsay`. Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
+    /// `~/Documents/hearsay` (`hearsay-dev` in dev mode). Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
     /// elsewhere, so unattended runs never touch the user's own transcripts.
     static var defaultDirectory: URL {
-        if let dir = ProcessInfo.processInfo.environment["HEARSAY_TRANSCRIPTS_DIR"], !dir.isEmpty { return URL(fileURLWithPath: dir, isDirectory: true) }
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("hearsay", isDirectory: true)
+        DevMode.transcriptsDirectory(dev: DevMode.isDev, environment: ProcessInfo.processInfo.environment,
+                                     documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
     }
 
     let directory: URL
@@ -25,7 +24,24 @@ final class TranscriptStore {
     private(set) var lines: [TranscriptLine] = []
     /// Pauses in order; the last one is open (`end == nil`) while paused.
     private(set) var pauses: [PauseInterval] = []
+    /// Diarized speakers seen so far, in order, and which one is the enrolled voice (see
+    /// SpeakerRoster): where "Speaker 2" comes from. Names people give them live in `meta.names`.
+    private(set) var speakers = SpeakerRoster()
     let formatter: TranscriptFormatter
+    /// Title, tags and voice names (see `TranscriptMeta`). Kept here so every write, including
+    /// the final one, carries them; a change after the file exists rewrites it like a new line.
+    var meta = TranscriptMeta() {
+        didSet { if meta != oldValue, !lines.isEmpty { scheduleWrite() } }
+    }
+    /// Settings ▸ Your name at the time of each write (read then, not at creation, so a name set
+    /// mid-session reaches the file). Injected so tests are deterministic.
+    let yourName: () -> String?
+    /// `formatter` with this transcript's names applied: what every render and export uses.
+    var namedFormatter: TranscriptFormatter {
+        var f = formatter
+        f.names = VoiceNames(meta, yourName: yourName(), roster: speakers)
+        return f
+    }
     /// Fixed at creation from `startedAt`; " 2", " 3"… appended if that minute is taken.
     let markdownURL: URL
     var jsonURL: URL { markdownURL.deletingPathExtension().appendingPathExtension("json") }
@@ -38,12 +54,14 @@ final class TranscriptStore {
     let debounce: TimeInterval
 
     init(directory: URL = TranscriptStore.defaultDirectory, startedAt: Date = Date(), engine: String,
-         formatter: TranscriptFormatter = TranscriptFormatter(), debounce: TimeInterval = 1) {
+         formatter: TranscriptFormatter = TranscriptFormatter(), debounce: TimeInterval = 1,
+         yourName: @escaping () -> String? = { VoiceNames.storedYourName }) {
         self.directory = directory
         self.startedAt = startedAt
         self.engine = engine
         self.formatter = formatter
         self.debounce = debounce
+        self.yourName = yourName
         markdownURL = TranscriptStore.uniqueURL(in: directory, base: formatter.baseName(for: startedAt))
     }
 
@@ -75,6 +93,29 @@ final class TranscriptStore {
         return lo
     }
 
+    // MARK: Speakers
+
+    /// Records a diarized speaker id as soon as it is heard (partials included), so numbering
+    /// follows the order people first spoke.
+    func note(speaker id: String) {
+        guard speakers.note(id), !lines.isEmpty else { return }
+        scheduleWrite()
+    }
+
+    /// Marks a speaker as the enrolled voice: "me" instead of a number (see `SpeakerRoster`).
+    func markEnrolled(speaker id: String) {
+        guard speakers.markEnrolled(id), !lines.isEmpty else { return }
+        scheduleWrite()
+    }
+
+    /// Gives a speaker a name ("Anna") that replaces "Speaker 2" in the files; an empty name
+    /// goes back to the number. The same as renaming its chip: the name lives in `meta.names`
+    /// under the speaker id (which is the voice's key), and the transcript is rewritten.
+    func rename(speaker id: String, to name: String) {
+        speakers.note(id)
+        meta.setName(name, forKey: id)
+    }
+
     // MARK: Pauses
 
     var isPaused: Bool { pauses.last.map { $0.end == nil } ?? false }
@@ -98,11 +139,11 @@ final class TranscriptStore {
         endPause(at: end)
         endedAt = end
         writePending = false
-        guard !lines.isEmpty else { Log.info("transcript: no lines, nothing saved"); return }
+        guard !lines.isEmpty else { Log.info(.session, "transcript: no lines, nothing saved"); return }
         let snapshot = render()
         io.sync { TranscriptStore.write(snapshot) }
         hasFile = true
-        Log.info("transcript: finalised \(markdownURL.lastPathComponent) (\(lines.count) lines)")
+        Log.info(.session, "transcript: finalised \(markdownURL.lastPathComponent) (\(lines.count) lines)")
     }
 
     private func scheduleWrite() {
@@ -131,11 +172,17 @@ final class TranscriptStore {
 
     private struct Snapshot { var dir: URL; var md: URL; var json: URL; var markdown: String; var sidecar: Data }
 
-    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses? }`.
-    /// `pauses` is optional so sidecars written before pause existed still decode (same version).
+    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses?,
+    /// title?, tags?, names?, speakers? }`. Every field after `lines` is optional, so sidecars
+    /// written before it existed still decode (same version). `title`, `tags` and `names` are the
+    /// person's (`TranscriptMeta`); `speakers` is the diarizer's roster (`SpeakerRoster`): speaker
+    /// id → generated label ("Speaker 2", or "me" for the enrolled voice). A line's `speakerID` is
+    /// also its voice's key, so `names[id]`, when present, overrides `speakers[id]`.
     struct Sidecar: Codable {
         var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine]
         var pauses: [PauseInterval]?
+        var title: String?; var tags: [String]?; var names: [String: String]?
+        var speakers: [String: String]?
     }
 
     /// ISO 8601 with milliseconds: whole seconds would lose the order of lines that start in the
@@ -169,10 +216,29 @@ final class TranscriptStore {
     }
 
     private func render() -> Snapshot {
-        let md = formatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses)
-        let side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        let md = namedFormatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses, meta: meta)
+        var side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        side.meta = meta
+        side.speakers = speakers.isEmpty ? nil : speakers.map
         let data = (try? TranscriptStore.jsonEncoder.encode(side)) ?? Data()
         return Snapshot(dir: directory, md: markdownURL, json: jsonURL, markdown: md, sidecar: data)
+    }
+
+    /// Rewrites a saved transcript's files with new title / tags / names: the sidecar keeps every
+    /// other field as it was, and the Markdown is rendered again from the sidecar's lines (its
+    /// header carries the title and tags; its lines the names). Synchronous; call off the main
+    /// thread. The files' names never change: they are the session's start time.
+    static func updateMeta(_ meta: TranscriptMeta, at jsonURL: URL, formatter: TranscriptFormatter = TranscriptFormatter(),
+                           yourName: String? = VoiceNames.storedYourName) throws {
+        var side = try jsonDecoder.decode(Sidecar.self, from: Data(contentsOf: jsonURL))
+        side.meta = meta
+        var f = formatter
+        f.names = VoiceNames(meta, yourName: yourName, roster: side.roster)
+        let md = f.markdown(lines: side.lines, start: side.startedAt, end: side.endedAt, engine: side.engine, pauses: side.pauses ?? [], meta: meta)
+        let mdURL = jsonURL.deletingPathExtension().appendingPathExtension("md")
+        try Data(md.utf8).write(to: mdURL, options: .atomic)
+        try jsonEncoder.encode(side).write(to: jsonURL, options: .atomic)
+        Log.info("transcript: updated title/tags/names of \(jsonURL.lastPathComponent)")
     }
 
     private static func write(_ s: Snapshot) {
@@ -181,14 +247,14 @@ final class TranscriptStore {
             try Data(s.markdown.utf8).write(to: s.md, options: .atomic)
             try s.sidecar.write(to: s.json, options: .atomic)
         } catch {
-            Log.error("transcript: write failed for \(s.md.path): \(error)")
+            Log.error(.session, "transcript: write failed for \(s.md.path): \(error)")
         }
     }
 
     // MARK: Exports and Finder
 
     /// `hiding`: voices the window has turned off; they stay in the files, out of the clipboard.
-    func plainText(hiding hidden: Set<Voice> = []) -> String { formatter.plainText(lines: lines.visible(hiding: hidden)) }
+    func plainText(hiding hidden: Set<Voice> = []) -> String { namedFormatter.plainText(lines: lines.visible(hiding: hidden)) }
 
     func copyAll(hiding hidden: Set<Voice> = []) {
         TranscriptStore.copy(plainText(hiding: hidden))
@@ -203,7 +269,7 @@ final class TranscriptStore {
     @discardableResult
     func exportSRT(hiding hidden: Set<Voice> = []) -> URL? {
         TranscriptStore.writeSRT(lines: lines.visible(hiding: hidden), start: startedAt,
-                                 nextTo: markdownURL, formatter: formatter)
+                                 nextTo: markdownURL, formatter: namedFormatter)
     }
 
     /// `<transcript>.srt` beside the given transcript file; nil when there is nothing to write
@@ -216,10 +282,10 @@ final class TranscriptStore {
         do {
             try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(formatter.srt(lines: lines, start: start).utf8).write(to: url, options: .atomic)
-            Log.info("transcript: exported \(url.lastPathComponent)")
+            Log.info(.session, "transcript: exported \(url.lastPathComponent)")
             return url
         } catch {
-            Log.error("transcript: SRT export failed: \(error)")
+            Log.error(.session, "transcript: SRT export failed: \(error)")
             return nil
         }
     }

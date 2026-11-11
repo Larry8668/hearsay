@@ -12,7 +12,7 @@ enum DebugSnapshot {
         guard let path = ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_DIR"], !path.isEmpty else { return }
         let dir = URL(fileURLWithPath: path, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        Log.info("debug snapshots → \(dir.path)")
+        Log.info(.ui, "debug snapshots → \(dir.path)")
         // HEARSAY_SNAPSHOT_INTERVAL=0.25 catches short-lived states (an empty transcript at start).
         let every = Double(ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_INTERVAL"] ?? "") ?? 2
         let t = Timer(timeInterval: max(0.1, every), repeats: true) { _ in
@@ -49,6 +49,21 @@ enum DebugSnapshot {
             if sequence { frameLog += "\(count) \(name) \(NSStringFromRect(w.frame))\n" }
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + suffix + ".png"))
         }
+        if ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_ALL"] == "1" { dumpOtherWindows(to: dir) }
+    }
+
+    /// `HEARSAY_SNAPSHOT_ALL=1`: also the process's on-screen windows that aren't `NSApp.windows`
+    /// (an open menu, a save panel), as the window server draws them, to `extra-<id>.png`.
+    /// Capturing one's own windows needs no Screen Recording permission.
+    @MainActor private static func dumpOtherWindows(to dir: URL) {
+        let known = Set(NSApp.windows.map(\.windowNumber))
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for info in list {
+            guard (info[kCGWindowOwnerPID as String] as? Int32) == getpid(), let id = info[kCGWindowNumber as String] as? UInt32,
+                  !known.contains(Int(id)), let img = createImage?(.null, 1 << 3, id, 1 << 3)?.takeRetainedValue() else { continue }
+            let rep = NSBitmapImageRep(cgImage: img)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("extra-\(id).png"))
+        }
     }
 
     /// The window as the window server composites it (real material and shadow; what is behind
@@ -83,17 +98,25 @@ enum DebugSnapshot {
 
     /// Development aid: `HEARSAY_UI_SCRIPT="panel@5,captions@12,pause@20"` runs the named actions
     /// that many seconds after launch, so UI states that need a click can be snapshotted unattended.
+    /// An action can take text: `title=Design review@6` runs `title` with `scriptArgument` set
+    /// to "Design review" (no "," or "@" in it, as they delimit the script).
     static func runScriptIfRequested(_ actions: [String: () -> Void]) {
         guard let script = ProcessInfo.processInfo.environment["HEARSAY_UI_SCRIPT"] else { return }
         for step in script.split(separator: ",") {
             let parts = step.split(separator: "@")
-            guard parts.count == 2, let action = actions[String(parts[0])], let at = Double(parts[1]) else { continue }
+            guard parts.count == 2, let at = Double(parts[1]) else { continue }
+            let call = parts[0].split(separator: "=", maxSplits: 1).map(String.init)
+            guard let name = call.first, let action = actions[name] else { continue }
             DispatchQueue.main.asyncAfter(deadline: .now() + at) {
-                Log.info("ui script: \(parts[0])")
+                Log.info(.ui, "ui script: \(parts[0])")
+                scriptArgument = call.count > 1 ? call[1] : ""
                 action()
             }
         }
     }
+
+    /// The text after "=" of the script step being run ("" when none).
+    @MainActor static var scriptArgument = ""
 
     /// "✓ Me (microphone)", "  Start listening ⌃⌥H", "(disabled) Not listening", nested by indent.
     static func describe(_ menu: NSMenu, indent: String = "") -> String {

@@ -20,6 +20,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var setRecordingBarMode: (String) -> Void = { _ in }
         var setFontSize: (Double) -> Void
         var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
+        /// Settings ▸ Your name…: asks for the name used for "me". Defaulted so the delegate wires it up when it can.
+        var setYourName: () -> Void = {}
+        var setDiarization: (String) -> Void       // DiarizationMode raw value
+        var learnVoice: () -> Void
+        var forgetVoice: () -> Void
         var showWelcome: () -> Void
         var openLogs: () -> Void
         var openSettings: (Speaker) -> Void
@@ -29,6 +34,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var copyUpdateCommand: () -> Void
         var openReleasePage: () -> Void
         var toggleUpdateChecks: () -> Void
+        var about: () -> Void = {}
         var quit: () -> Void
     }
 
@@ -49,7 +55,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var launchAtLogin = false
         var fontSize: Double = 13
         var echoCancellation = "auto"
+        var diarization = "microphone"
+        var voiceEnrolled = false
         var engine = ""
+        /// Settings ▸ Your name, shown in the item's title.
+        var yourName: String?
     }
 
     private let item: NSStatusItem
@@ -76,8 +86,13 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let updateChecksItem = NSMenuItem()
     private let fontItem = NSMenuItem()
     private let echoItem = NSMenuItem()
+    private let yourNameItem = NSMenuItem()
+    private let diarizationItem = NSMenuItem()
+    private let learnVoiceItem = NSMenuItem()
+    private let forgetVoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
+    private let verboseItem = NSMenuItem()
     var onMenuWillOpen: (() -> Void)?
     var menuDescription: String { DebugSnapshot.describe(menu) }
 
@@ -85,7 +100,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         self.actions = actions
         self.hotkey = hotkey
         self.pauseHotkey = pauseHotkey
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item = NSStatusBar.system.statusItem(withLength: DevMode.isDev ? NSStatusItem.variableLength : NSStatusItem.squareLength)
         super.init()
         build()
         setIcon(.idle)
@@ -101,6 +116,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
+        if DevMode.isDev {
+            let dev = NSMenuItem(title: "hearsay dev build · \(DevMode.versionString)", action: nil, keyEquivalent: "")
+            dev.isEnabled = false
+            menu.addItem(dev)
+        }
         statusLine.isEnabled = false
         warningLine.isEnabled = false
         warningLine.isHidden = true
@@ -187,6 +207,26 @@ final class MenuBar: NSObject, NSMenuDelegate {
         echo.addItem(note)
         echoItem.submenu = echo
         settings.addItem(echoItem)
+        diarizationItem.title = "Tell speakers apart"
+        let diarization = NSMenu()
+        for choice in DiarizationMode.allCases {
+            let mi = item(choice.title, #selector(chooseDiarization(_:)))
+            mi.representedObject = choice.rawValue
+            diarization.addItem(mi)
+        }
+        diarization.addItem(.separator())
+        let dnote = NSMenuItem(title: "Labels Speaker 1, 2… when several people share one source", action: nil, keyEquivalent: "")
+        dnote.isEnabled = false
+        diarization.addItem(dnote)
+        diarization.addItem(.separator())
+        learnVoiceItem.title = "Learn my voice…"
+        bind(learnVoiceItem, #selector(learnVoice))
+        diarization.addItem(learnVoiceItem)
+        forgetVoiceItem.title = "Forget my voice"
+        bind(forgetVoiceItem, #selector(forgetVoice))
+        diarization.addItem(forgetVoiceItem)
+        diarizationItem.submenu = diarization
+        settings.addItem(diarizationItem)
         fontItem.title = "Transcript text size"
         let fonts = NSMenu()
         for (size, name) in AppModel.fontChoices {
@@ -196,6 +236,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         fontItem.submenu = fonts
         settings.addItem(fontItem)
+        yourNameItem.title = "Your name…"
+        yourNameItem.toolTip = "What \"me\" is called in transcripts, captions and exports"
+        bind(yourNameItem, #selector(setYourName))
+        settings.addItem(yourNameItem)
         engineItem.isEnabled = false
         settings.addItem(engineItem)
         menu.addItem(submenu("Settings", settings))
@@ -203,6 +247,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         // Troubleshooting ▸
         let trouble = NSMenu()
         trouble.addItem(item("Open logs", #selector(openLogs)))
+        trouble.addItem(item("Export diagnostics…", #selector(exportDiagnostics)))
+        verboseItem.title = "Verbose logging (includes transcript text)"
+        verboseItem.target = self
+        verboseItem.action = #selector(toggleVerbose)
+        trouble.addItem(verboseItem)
         trouble.addItem(item("Microphone settings…", #selector(openMicSettings)))
         trouble.addItem(item("System audio settings…", #selector(openTapSettings)))
         trouble.addItem(item("Relaunch hearsay", #selector(relaunch)))
@@ -257,6 +306,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         item.button?.image = img
         item.button?.toolTip = tip
+        if DevMode.isDev {
+            item.button?.imagePosition = .imageLeft
+            item.button?.attributedTitle = NSAttributedString(string: "dev", attributes: [
+                .font: NSFont.systemFont(ofSize: 8, weight: .bold), .baselineOffset: 5])
+        }
         // Off: the template symbol at reduced alpha, so it reads as greyed out next to the
         // other menu bar icons. The button's contentTintColor does nothing for a template image.
         item.button?.alphaValue = state == .idle ? 0.45 : 1
@@ -285,7 +339,14 @@ final class MenuBar: NSObject, NSMenuDelegate {
         loginItem.state = s.launchAtLogin ? .on : .off
         for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) / 10 == s.fontSize ? .on : .off }
         for mi in echoItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == s.echoCancellation ? .on : .off }
+        for mi in diarizationItem.submenu?.items ?? [] where mi.representedObject != nil {
+            mi.state = (mi.representedObject as? String) == s.diarization ? .on : .off
+        }
+        learnVoiceItem.title = s.voiceEnrolled ? "Learn my voice again…" : "Learn my voice…"
+        learnVoiceItem.isEnabled = !s.listening
+        forgetVoiceItem.isHidden = !s.voiceEnrolled
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
+        yourNameItem.title = s.yourName.map { "Your name: \($0)…" } ?? "Your name…"
     }
 
     /// Footer: "hearsay 0.1.0 — up to date" or "⬆ Update available: 0.1.1", submenu with actions.
@@ -310,6 +371,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         m.addItem(item("Release notes", #selector(openReleasePage)))
         m.addItem(item("Check for updates now", #selector(checkUpdates)))
+        m.addItem(.separator())
+        m.addItem(item("About hearsay", #selector(about)))
     }
 
     // MARK: Actions
@@ -329,7 +392,13 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag) / 10) }
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
+    @objc private func exportDiagnostics() { MainActor.assumeIsolated { Diagnostics.exportInteractively() } }
+    @objc private func toggleVerbose() { Log.verboseText.toggle(); verboseItem.state = Log.verboseText ? .on : .off }
     @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
+    @objc private func setYourName() { actions.setYourName() }
+    @objc private func chooseDiarization(_ sender: NSMenuItem) { actions.setDiarization(sender.representedObject as? String ?? "microphone") }
+    @objc private func learnVoice() { actions.learnVoice() }
+    @objc private func forgetVoice() { actions.forgetVoice() }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
     @objc private func relaunch() { actions.relaunch() }
@@ -338,7 +407,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func copyUpdateCommand() { actions.copyUpdateCommand() }
     @objc private func openReleasePage() { actions.openReleasePage() }
     @objc private func toggleUpdateChecks() { actions.toggleUpdateChecks() }
+    @objc private func about() { actions.about() }
     @objc private func quit() { actions.quit() }
 
-    func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
+    func menuWillOpen(_ menu: NSMenu) {
+        verboseItem.state = Log.verboseText ? .on : .off
+        onMenuWillOpen?()
+    }
 }

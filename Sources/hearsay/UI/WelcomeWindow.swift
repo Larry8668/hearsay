@@ -7,7 +7,7 @@ import SwiftUI
 /// the download bar moves and the mic row flips to "Allowed" live.
 final class WelcomeWindow: NSObject, NSWindowDelegate {
     static let shownKey = "welcomeShown"
-    static var shouldShowAutomatically: Bool { !UserDefaults.standard.bool(forKey: shownKey) }
+    static var shouldShowAutomatically: Bool { !Prefs.store.bool(forKey: shownKey) }
 
     private let model: AppModel
     private var window: NSWindow?
@@ -17,7 +17,7 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
     var isVisible: Bool { window?.isVisible ?? false }
 
     func show() {
-        UserDefaults.standard.set(true, forKey: Self.shownKey)
+        Prefs.store.set(true, forKey: Self.shownKey)
         WelcomeWindow.refreshMic(model)
         if let w = window { NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentViewController: NSHostingController(rootView: WelcomeView(model: model)))
@@ -32,7 +32,7 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
         window = w
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
-        Log.info("welcome shown (mic \(model.micAuthorized ? "allowed" : "not allowed"), model \(model.modelState))")
+        Log.info(.ui, "welcome shown (mic \(model.micAuthorized ? "allowed" : "not allowed"), model \(model.modelState))")
     }
 
     func close() { window?.close() }
@@ -47,9 +47,9 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
     static func requestMic(_ model: AppModel) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .notDetermined:
-            Log.info("welcome: requesting microphone access")
+            Log.info(.ui, "welcome: requesting microphone access")
             AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Log.info("microphone access \(granted ? "granted" : "denied")")
+                Log.info(.ui, "microphone access \(granted ? "granted" : "denied")")
                 DispatchQueue.main.async { refreshMic(model) }
             }
         case .authorized: refreshMic(model)
@@ -70,18 +70,21 @@ struct WelcomeView: View {
                     Text("Live “me / them” transcripts of your calls.").foregroundStyle(.secondary)
                 }
             }
-            Text("hearsay listens to your microphone (me) and to what your Mac plays (them: Zoom, Meet, Teams, a browser tab) and writes one transcript, saved to Documents ▸ hearsay as the call goes on.")
+            Text("hearsay listens to your microphone (me) and to each app your Mac plays sound from (them: Zoom, Meet, Teams, a video), shows live captions on a small bar at the bottom of the screen, and saves the transcript to Documents ▸ hearsay as the call goes on.")
                 .fixedSize(horizontal: false, vertical: true)
             Label("Everything happens on this Mac. Audio and text never leave it.", systemImage: "lock.fill")
                 .font(.callout).foregroundStyle(.secondary)
 
             VStack(spacing: 0) {
+                // Once denied, macOS never asks again: say so, and send the user to the pane.
+                let micDenied = !model.micAuthorized && Permissions.microphone == .denied
                 row(symbol: "mic.fill", tint: .blue, title: "Microphone",
-                    note: model.micAuthorized ? "Allowed" : "Needed to transcribe what you say") {
+                    note: model.micAuthorized ? "Allowed"
+                        : micDenied ? "Turned off in System Settings ▸ Privacy & Security ▸ Microphone" : "Needed to transcribe what you say") {
                     if model.micAuthorized {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
                     } else {
-                        Button("Allow…") { model.actions.requestMic() }
+                        Button(micDenied ? "Open settings…" : "Allow…") { model.actions.requestMic() }
                     }
                 }
                 Divider().padding(.leading, 44)
@@ -97,8 +100,9 @@ struct WelcomeView: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
 
             HStack {
-                Text("Toggle any time with ⌃⌥H or from the menu-bar waveform.").font(.callout).foregroundStyle(.secondary)
-                Spacer()
+                Text("⌃⌥H starts and stops from any app. The bar's ≡ button opens the hearsay window with the full transcript.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 16)
                 Button(model.isActive ? "Listening" : "Start listening") {
                     model.actions.closeWelcome()
                     if !model.isActive { model.actions.toggleListening() }
@@ -118,7 +122,7 @@ struct WelcomeView: View {
         case .downloading(let f): return f < 0 ? "Preparing…" : "Downloading \(Int(f * 100))% · stays on this Mac"
         case .paused(let f): return f < 0 ? "Download paused" : "Paused at \(Int(f * 100))% · resumes from here"
         case .ready: return "Ready · \(model.engineID) · stays on this Mac"
-        case .failed(let e): return "Failed: \(e)"
+        case .failed(let e): return "Couldn't download or load it: \(e)"
         }
     }
 
@@ -139,7 +143,11 @@ struct WelcomeView: View {
         case .notDownloaded:
             Button("Download") { model.actions.resumeDownload() }.controlSize(.small)
         case .ready: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
-        case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).font(.title3)
+        case .failed:
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow).font(.title3)
+                Button("Retry") { model.actions.resumeDownload() }.controlSize(.small)
+            }
         }
     }
 

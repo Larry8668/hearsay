@@ -62,7 +62,7 @@ final class PerAppAudioTap: AudioSource {
             addOutputListener()
         }
         cont.onTermination = { [weak self] _ in self?.stop() }
-        Log.info("apptaps: started (\(displayName))")
+        Log.info(.tap, "apptaps: started (\(displayName))")
         return stream
     }
 
@@ -81,7 +81,7 @@ final class PerAppAudioTap: AudioSource {
                 c?.onTermination = nil
                 c?.finish()
             }
-            Log.info("apptaps: stopped")
+            Log.info(.tap, "apptaps: stopped")
         }
     }
 
@@ -104,23 +104,23 @@ final class PerAppAudioTap: AudioSource {
             missing[app] = nil
             if let tap = taps[app] {
                 guard Set(tap.processes) != Set(objects) else { continue }
-                Log.info("apptaps: \(app) processes changed; rebuilding its tap")
+                Log.info(.tap, "apptaps: \(app) processes changed; rebuilding its tap")
                 do { try tap.rebuild(processes: objects) } catch {
-                    Log.warn("apptaps: rebuild for \(app) failed: \(error.localizedDescription)")
+                    Log.warn(.tap, "apptaps: rebuild for \(app) failed: \(error.localizedDescription)")
                     tap.tearDown(); taps[app] = nil
                 }
             } else {
                 guard taps.count < Self.maxApps else {
-                    if !warnedLimit { Log.warn("apptaps: more than \(Self.maxApps) apps playing; ignoring \(app)"); warnedLimit = true }
+                    if !warnedLimit { Log.warn(.tap, "apptaps: more than \(Self.maxApps) apps playing; ignoring \(app)"); warnedLimit = true }
                     continue
                 }
                 do {
                     taps[app] = try AppTap(app: app, processes: objects, ioQueue: ioQueue) { [weak self] chunk in
                         self?.continuation?.yield(chunk)   // on ioQueue, like `continuation`
                     }
-                    Log.info("apptaps: tapping \(app) (\(objects.count) process\(objects.count == 1 ? "" : "es"), \(taps.count) app\(taps.count == 1 ? "" : "s") tapped)")
+                    Log.info(.tap, "apptaps: tapping \(app) (\(objects.count) process\(objects.count == 1 ? "" : "es"), \(taps.count) app\(taps.count == 1 ? "" : "s") tapped)")
                 } catch {
-                    Log.warn("apptaps: tap for \(app) failed: \(error.localizedDescription)")
+                    Log.warn(.tap, "apptaps: tap for \(app) failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -128,7 +128,7 @@ final class PerAppAudioTap: AudioSource {
             missing[app, default: 0] += 1
             if missing[app]! >= Self.missingPolls {
                 taps[app]?.tearDown(); taps[app] = nil; missing[app] = nil
-                Log.info("apptaps: \(app) stopped playing; tap removed")
+                Log.info(.tap, "apptaps: \(app) stopped playing; tap removed")
             }
         }
     }
@@ -160,7 +160,7 @@ final class PerAppAudioTap: AudioSource {
         guard running else { return }
         updateDisplayName()
         for (app, tap) in taps where tap.formatChanged() {
-            Log.info("apptaps: tap format changed for \(app); rebuilding")
+            Log.info(.tap, "apptaps: tap format changed for \(app); rebuilding")
             do { try tap.rebuild(processes: tap.processes) } catch { tap.tearDown(); taps[app] = nil }
         }
     }
@@ -260,7 +260,7 @@ private final class AppTap {
     private func process(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
         guard let resampler else { return }
         ioCallbacks += 1
-        if ioCallbacks == 1 { Log.info("apptaps: first IO buffer from \(app) (\(buffer.frameLength) frames)") }
+        if ioCallbacks == 1 { Log.info(.tap, "apptaps: first IO buffer from \(app) (\(buffer.frameLength) frames)") }
         let samples = resampler.convert(buffer)
         let start = hostTime.map(CA.date(fromHostTime:))
         for chunk in assembler.append(samples, startTime: start, sourceApps: [app]) { forward(chunk) }
@@ -294,12 +294,12 @@ private final class AppTap {
         ioProcID = nil
         if aggregateID != CA.unknown {
             let err = AudioHardwareDestroyAggregateDevice(aggregateID)
-            if err != noErr { Log.warn("apptaps: destroy aggregate (\(app)) failed: \(err)") }
+            if err != noErr { Log.warn(.tap, "apptaps: destroy aggregate (\(app)) failed: \(err)") }
             aggregateID = CA.unknown
         }
         if tapID != CA.unknown {
             let err = AudioHardwareDestroyProcessTap(tapID)
-            if err != noErr { Log.warn("apptaps: destroy tap (\(app)) failed: \(err)") }
+            if err != noErr { Log.warn(.tap, "apptaps: destroy tap (\(app)) failed: \(err)") }
             tapID = CA.unknown
         }
         ioQueue.sync {
