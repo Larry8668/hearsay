@@ -17,7 +17,7 @@ extension SessionController {
                 model.discardPartials(.me)
                 return
             }
-            if let id = speakerID, !t.isEmpty { noteSpeaker(id) }
+            // No `noteSpeaker` here: a voice joins the roster with its first line (see `noteSpeaker`).
             // A stream has one hypothesis; when its speaker changes the old voice's entry is stale.
             for v in model.partials.keys where v.speaker == speaker && v.app == voice.app && v != voice { model.partials[v] = nil }
             model.partials[voice] = t.isEmpty ? nil : t
@@ -25,7 +25,6 @@ extension SessionController {
             guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 model.clearPartial(for: line); return
             }
-            if let id = line.speakerID { noteSpeaker(id) }
             if line.speaker == .them {
                 echo.observeThemFinal(text: line.text, start: line.start, end: line.end)
             } else if case .echo(let why) = echo.checkMeFinal(text: line.text, start: line.start, end: line.end,
@@ -34,6 +33,7 @@ extension SessionController {
                 model.discardPartials(.me)
                 return
             }
+            if let id = line.speakerID { noteSpeaker(id) }
             store?.insert(line)
             model.insert(line)
         case .warning(let message):
@@ -50,7 +50,10 @@ extension SessionController {
         return them - me
     }
 
-    /// A diarized speaker was heard: number it in order of appearance (file and live views).
+    /// A diarized speaker owns a line: number it in order of first line (file and live views).
+    /// Partials never get here: the speaker under a partial can still turn out to be someone
+    /// already numbered, and a number given to them would stay in the roster and the sidecar
+    /// with no line behind it. Until their first line a new voice's chip has no number.
     private func noteSpeaker(_ id: String) {
         store?.note(speaker: id)
         var r = model.speakers

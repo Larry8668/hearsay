@@ -19,8 +19,15 @@ actor ModelStore {
     /// `~/Library/Application Support/hearsay/models/`. FluidAudio's loaders accept a root
     /// directory and append the repo's folder (e.g. `parakeet-eou-streaming/160ms`).
     nonisolated static var modelDirectory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("hearsay/models", isDirectory: true)
+        resolveDirectory(dev: DevMode.isDev, environment: ProcessInfo.processInfo.environment,
+                         appSupport: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0])
+    }
+
+    /// Dev mode only: `HEARSAY_MODELS_DIR` points at another folder (an empty one shows the
+    /// first-run chooser without touching the installed app's models). Ignored outside dev mode.
+    nonisolated static func resolveDirectory(dev: Bool, environment: [String: String], appSupport: URL) -> URL {
+        if dev, let dir = environment["HEARSAY_MODELS_DIR"], !dir.isEmpty { return URL(fileURLWithPath: dir, isDirectory: true) }
+        return appSupport.appendingPathComponent("hearsay/models", isDirectory: true)
     }
 
     nonisolated static func directory(for variant: StreamingModelVariant) -> URL {

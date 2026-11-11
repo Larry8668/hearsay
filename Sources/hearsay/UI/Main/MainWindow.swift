@@ -216,11 +216,16 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             return mi
         }
         let some = !shownLines().isEmpty
-        add("Export…", #selector(exportTranscript), "e").isEnabled = some
-        add("Export subtitles (.srt)", #selector(exportSRT), "").isEnabled = some
+        // One item per format: the save panel's format popup is easy to miss.
+        for f in ExportFormat.allCases {
+            let mi = add("Export as \(f.title)…", #selector(exportAs(_:)), "")
+            mi.representedObject = f.rawValue
+            mi.isEnabled = some
+        }
         menu.addItem(.separator())
         add("Copy as text", #selector(copyTranscript), "").isEnabled = some
-        add("Copy as Markdown", #selector(copyMarkdown), "").isEnabled = some
+        add("Copy as Markdown (for an AI chat)", #selector(copyMarkdown), "").isEnabled = some
+        add("Copy as JSON", #selector(copyJSON), "").isEnabled = some
         menu.addItem(.separator())
         _ = add("Reveal in Finder", #selector(revealInFinder), "")
         _ = add(past ? "Open in editor" : "Open transcript file", #selector(openTranscript), "")
@@ -257,10 +262,34 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         if let e = shownExport() { TranscriptStore.copy(e.render(.markdown)) }
     }
 
-    /// Export… (⋯ menu, File ▸ Export…, ⌘E): the save panel with the format popup.
+    @objc private func copyJSON() {
+        guard !state.isBulk else { return }
+        if let e = shownExport() { TranscriptStore.copy(e.render(.json)) }
+    }
+
+    /// Export… (File ▸ Export…): the save panel with the format popup, on the last format used.
     @objc func exportTranscript() {
         guard !state.isBulk else { return }
         if let e = shownExport() { ExportPanel.run(e, in: window) }
+    }
+
+    /// ⋯ ▸ Export as <format>… (⌘E = Markdown): the same panel, with that format preselected.
+    @objc private func exportAs(_ sender: NSMenuItem) {
+        guard !state.isBulk, let raw = sender.representedObject as? String, let f = ExportFormat(rawValue: raw) else { return }
+        if let e = shownExport() { ExportPanel.run(e, in: window, format: f) }
+    }
+
+    /// Menu bar ▸ Export as <format>…: the current (or last) session, as a standalone panel.
+    func exportSession(_ format: ExportFormat) {
+        guard let store = liveStore() else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        ExportPanel.run(TranscriptExport(store: store, hiding: model.hiddenVoices), in: nil, format: format)
+    }
+
+    /// Menu bar ▸ Copy as Markdown: the current (or last) session.
+    func copySession(_ format: ExportFormat) {
+        guard let store = liveStore() else { return }
+        TranscriptStore.copy(TranscriptExport(store: store, hiding: model.hiddenVoices).render(format))
     }
 
     @objc private func exportSRT() {

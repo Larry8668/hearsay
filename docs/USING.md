@@ -4,6 +4,29 @@ hearsay lives in the menu bar as a waveform that reads like a switch: greyed out
 **green** while listening, an **orange** pause symbol while paused, and a **yellow** warning
 triangle when something needs your attention (a permission, the speech model).
 
+## First run: choose your models
+
+Nothing downloads until you say so. The welcome window's **Choose your models** step asks for:
+
+- **Speech to text** (required, pick one): *Best accuracy* is Parakeet Unified 0.6B, about 580 MB,
+  with punctuation and numbers; *Smaller and faster* is Parakeet EOU 120M, about 214 MB, with
+  roughly three times the mistakes, all lowercase and no punctuation.
+- **Tell speakers apart** (optional): *Off*, *Up to 4 speakers, steadiest* (Sortformer, about
+  234 MB, the default) or *Up to 10 speakers* (LS-EEND, about 43 MB). *Off* also turns
+  Settings ▸ Tell speakers apart off.
+
+It shows the total ("Downloads about 814 MB, stays on this Mac"); **Download** then fetches the
+speech model first and the speaker model after it, each with its own progress row and
+**Pause / Resume / Cancel**. **Start listening** unlocks once the speech model is ready. Cancelling
+the speech model brings the choice back. Models already on this Mac (after a reinstall or an
+update) are used as they are and never downloaded again; if they are all there, the step is skipped.
+
+**Settings ▸ Models…** lists every model with what it does, its size and its status (*Downloaded ·
+580 MB*, *Not downloaded*, *Downloading 43%*), with **Use**, **Download** and **Delete** (not for a
+model in use; it frees the disk space). A new speech model applies from the next session, a new
+speaker model the next time hearsay starts. `HEARSAY_MODELS_DIR` points a dev build at another
+folder (see [Building](BUILDING.md)).
+
 ## Start and stop
 
 - **⌃⌥H** (Control-Option-H) starts or stops listening from any app.
@@ -52,9 +75,17 @@ to the speech model and tells voices apart as they talk:
   moment a second person speaks, the first becomes **Speaker 1** and the newcomer **Speaker 2**, in
   the order they first spoke. On a call it reads **them · Zoom · Speaker 2**. Each speaker gets its
   own shade of the lane's colour (blues for the microphone, oranges for system audio).
+- Captions only name a speaker the model has settled on. The model first guesses about half a
+  second ahead and often changes its mind (a "fourth voice" that turns out to be the second); the
+  chip follows its settled answer, so it switches a moment after the voice does, and a newcomer
+  switches it only once they have held the floor long enough to start a line of their own.
+- A speaker is numbered when they get their first line, not when they first appear in the
+  captions. Until then their chip has no number (**them · Zoom**; on the microphone, once others
+  have been heard, **Speaker …**). So every speaker in the file has lines.
 - The transcript file carries the same labels; the header lists the speakers and the JSON sidecar
-  has each line's `speakerID` and a `speakers` map (id → generated label). An id is the voice's
-  key plus the speaker's number: `me#2`, `them:us.zoom.xos#1`.
+  has each line's `speakerID` and a `speakers` map (id → generated label) of the speakers who have
+  lines (plus your enrolled voice, below). An id is the voice's key plus the speaker's number:
+  `me#2`, `them:us.zoom.xos#1`.
 - *Speaker 2* is only the default: rename the chip in the hearsay window (see *Speaker names*
   below) and the name replaces it in the lines, the captions and every export. The name is
   saved in the sidecar's `names` map under the same id.
@@ -68,12 +99,43 @@ it hearing you). If it heard too little it says so and offers *Try again*. From 
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
 
-The model (NVIDIA Streaming Sortformer, 234 MB) is downloaded the first time the setting is on and
-kept with the speech models. It tells up to four voices apart per source; a fifth is merged into
-the closest one. Two very similar voices (the same pitch and accent) can land in one slot. Turning
-the setting on or off during a session restarts the affected source, so the change applies at
-once. `defaults write dev.hearsay.app diarizer lseend` (or `lseend-ami`) swaps in the LS-EEND model
-(43 MB, up to ten voices, less stable identities); `sortformer` is the default.
+Pick the speaker model under **Settings ▸ Tell speakers apart ▸ Model**:
+
+- **Steady, up to 4 speakers** (NVIDIA Streaming Sortformer, 234 MB), the default. Identities stay
+  put for the whole session and it copes with noise, but it has four slots per source: a fifth
+  voice is merged into the closest one. With exactly four people (a panel video, a four-way call)
+  a voice can also flip between two slots for a sentence.
+- **More speakers, up to 10** (LS-EEND, 43 MB): for bigger meetings. Less stable identities, and
+  in our tests it merged similar voices (three synthetic female voices became one) where
+  Sortformer kept them apart.
+
+The model is downloaded when you pick it in the welcome window or the first time it is needed
+(progress in the menu's status line) and kept with the speech models (Settings ▸ Models… shows and
+deletes them); switching drops the old one from memory. A switch made while listening
+applies from the next session, since a fresh model would hand out *Speaker 1* again to people
+already numbered. The choice is the `diarizer` setting (`sortformer`, `lseend`; `defaults write
+dev.hearsay.app diarizer lseend-ami` reaches the meeting-room LS-EEND variant the menu does not
+offer). Two very similar voices (the same pitch and accent) can land in one slot with either model.
+Turning the setting on or off during a session restarts the affected source, so that change
+applies at once.
+
+**What the log says.** Every source with speakers told apart writes a few `[diarize]` lines to the
+log (Troubleshooting ▸ Open logs), never anything that was said:
+
+```
+them:app.zen-browser.zen: new speaker #4 settled at 73.4 s
+them:app.zen-browser.zen: tentative #4 at 74.1 s settled as #2
+them:app.zen-browser.zen: turn #2→#4 at 74.3 s, held 0.9 s settled
+them:app.zen-browser.zen: summary · 4 speakers (#1 31.2 s, #2 20.4 s, #3 5.1 s, #4 1.2 s) · 12 turns · 7 tentative revisions (3 not logged)
+```
+
+*New speaker* is the first time the model settled on a voice; *tentative … settled as* is the
+model changing its mind about a voice it had guessed at; *turn* is a line cut because the speaker
+changed (how long the newcomer had spoken, settled, when it was cut). Times are seconds since the
+session started. The summary is written at Stop: seconds per speaker, turns, revisions. A source
+whose model keeps changing its mind is limited to one line of each kind per second; the summary
+counts the ones left out. A speaker with seconds in the summary but no lines in the file only
+ever spoke inside someone else's line.
 
 ## Speakers or headphones: echo cancellation
 
@@ -195,7 +257,7 @@ _Tags: design, q4 · Apps heard: Zoom · Engine: parakeet-unified-640ms · Made 
 | Open transcript | The current session's file, or the most recent one |
 | Open transcripts folder | Documents ▸ hearsay in Finder |
 | Copy transcript | The current or last session as plain text |
-| Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
+| Export transcript ▸ | The current or last session as Markdown, JSON, plain text or subtitles (.srt), through a save panel; or **Copy as Markdown** (handy to paste into an AI chat as context) / **Copy as JSON**. Hidden speakers are left out |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
 | Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, export diagnostics (a zip of the logs plus a system report, never your transcripts) to attach to a bug report, turn on verbose logging (also logs spoken text; off by default), jump to the Microphone / System Audio privacy settings, relaunch hearsay |
@@ -261,12 +323,14 @@ voice…*), or to the lane while it has only one voice.
 
 **Toolbar.** *Start listening* (or *Pause* / *Resume* and *Stop* with the listening time while a
 session runs), smaller / larger text, *Copy* (plain text, one timed line each), and under ⋯:
-*Export…*, *Export subtitles (.srt)*, *Copy as text* / *Copy as Markdown*, *Reveal in Finder*,
+*Export as Markdown / JSON / Plain text / Subtitles…*, *Copy as text* / *Copy as Markdown (for an
+AI chat)* / *Copy as JSON*, *Reveal in Finder*,
 *Open in editor* and, for a saved transcript, *Move to Trash…* (confirmed inline, under the
 header; the Markdown and JSON files go to the Trash together; with several selected it reads
 *Move N Transcripts to Trash…*).
 
-**Export.** *Export…* (also File ▸ Export…, ⌘E) opens a save panel with a format popup:
+**Export.** ⋯ ▸ *Export as …* opens a save panel on that format; File ▸ Export… (⌘E) opens it on
+the last format used, and the panel's format popup can still change it:
 **Markdown** (.md, the same layout as the saved file), **JSON** (.json, the sidecar's layout with
 the title, tags and names), **Plain text** (.txt, "name: text" per line, no times) and
 **Subtitles** (.srt, times from the start of the session). The suggested file name is the title,

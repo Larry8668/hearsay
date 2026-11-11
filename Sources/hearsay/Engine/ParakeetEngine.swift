@@ -109,12 +109,13 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
         guard let manager = state.withLock({ $0.manager }) else { throw EngineError.notPrepared }
         let key = stream ?? speaker.rawValue
         let diarizer = await DiarizerRegistry.shared.diarizer(for: speaker, stream: key)
+        let turnLog = diarizer == nil ? nil : await DiarizerRegistry.shared.turnLog(for: key)
         let (events, out) = AsyncStream.makeStream(of: EngineEvent.self, bufferingPolicy: .unbounded)
         let (inbox, input) = AsyncStream.makeStream(of: AudioChunk.self, bufferingPolicy: .unbounded)
         backlog.withLock { $0 = 0 }
         let job = Job(manager: manager, speaker: speaker, engine: identifier, config: trackerConfig,
                       partialInterval: partialInterval, backlog: backlog, out: out,
-                      stream: key, diarizer: diarizer)
+                      stream: key, diarizer: diarizer, turnLog: turnLog)
         let worker = Task.detached(priority: .userInitiated) { await job.run(inbox) }
         state.withLock { $0.inbox = input; $0.worker = worker }
         Log.info(.engine, "engine \(identifier): started for \(key)\(diarizer.map { " with \($0.kind.rawValue)" } ?? "")")
@@ -149,6 +150,8 @@ private struct Job: Sendable {
     /// Stream key for speaker ids, and the diarizer that tells this stream's speakers apart (nil: off).
     let stream: String
     let diarizer: SpeakerDiarizer?
+    /// Where this stream's speaker turns and revisions are logged (nil when speakers are not told apart).
+    let turnLog: SpeakerTurnLog?
     /// The diarizer keeps running this long after the last voiced chunk: its look-ahead (0.56 s
     /// for Sortformer) plus one of its 480 ms chunks, so the frames of the speech get decided.
     /// Beyond that silence is skipped: no inference while the lane is quiet.
@@ -189,6 +192,7 @@ private struct Job: Sendable {
                     do {
                         if let frames = try diarizer.feed(chunk.samples, laneSample: base) {
                             tracker.observe(frames)
+                            report(frames, &tracker)
                             if Self.trace, !frames.finalized.isEmpty {
                                 let rate = AudioChunk.sampleRate
                                 print(String(format: "  @%.2f runs: ", Double(tracker.samplesFed) / rate) + frames.finalized.map { String(format: "s%d[%.2f–%.2f]", $0.speaker, Double($0.start) / rate, Double($0.end) / rate) }.joined(separator: " "))
@@ -224,13 +228,15 @@ private struct Job: Sendable {
                                              stream: diarizer == nil ? nil : stream) {
                     out.yield(.final(line))
                 }
+                report(nil, &tracker)
                 if reset { try? await manager.reset(); await prime(); modelOrigin = tracker.samplesFed }
                 lastPartialText = ""
                 continue
             }
 
             let pending = tracker.pending
-            let who = diarizer == nil ? nil : tracker.currentSpeaker.map { SpeakerID.make(stream: stream, slot: $0) }
+            // Settled frames only (see `currentSpeaker`); until the line has any, the speaker shown stays.
+            let who = diarizer == nil ? nil : tracker.currentSpeaker.map { SpeakerID.make(stream: stream, slot: $0) } ?? lastPartialSpeaker
             if pending != lastPartialText || who != lastPartialSpeaker, clock.now - lastPartialAt >= partialInterval {
                 out.yield(.partial(text: pending, speaker: speaker, app: tracker.currentApp, speakerID: who))
                 lastPartialText = pending
@@ -251,6 +257,7 @@ private struct Job: Sendable {
             if let diarizer, tracker.samplesFed < diarizeUntil,
                let frames = try? diarizer.feed([Float](repeating: 0, count: pad), laneSample: tracker.samplesFed) {
                 tracker.observe(frames)
+                report(frames, &tracker)
             }
             tracker.update(transcript: try await manager.finish())
             await Self.collectWordTimes(manager, into: &tracker, origin: modelOrigin, misaligned: &timingsMisaligned, stream: stream)
@@ -265,6 +272,19 @@ private struct Job: Sendable {
         out.finish()
         let revised = tracker.realignments > 0 ? ", \(tracker.realignments) committed-text revisions realigned" : ""
         Log.info(.engine, "engine \(engine): stopped (\(speaker.rawValue))\(revised)")
+    }
+
+    /// Newly settled frames and the tracker's speaker events (revised look-ahead, turns) to the
+    /// diarize log. Times go through the tracker's clock, so they are wall-clock moments.
+    private func report(_ frames: SpeakerFrames?, _ tracker: inout UtteranceTracker) {
+        let ev = tracker.takeSpeakerEvents()
+        guard let turnLog else { return }
+        let rate = AudioChunk.sampleRate
+        for r in frames?.finalized ?? [] where r.end > r.start {
+            turnLog.settled(slot: r.speaker, seconds: Double(r.end - r.start) / rate, at: tracker.clock.date(at: r.start))
+        }
+        for r in ev.revisions { turnLog.revised(tentative: r.tentative, settled: r.settled, at: tracker.clock.date(at: r.at)) }
+        for t in ev.turns { turnLog.turn(from: t.from, to: t.to, at: tracker.clock.date(at: t.at), held: Double(t.held) / rate) }
     }
 
     /// Hands the model's per-token timings (Unified only) to the tracker, in lane samples. They

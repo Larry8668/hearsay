@@ -156,6 +156,54 @@ final class SpeakerTurnTests: XCTestCase {
         XCTAssertFalse(t.pieceTimesAligned)
     }
 
+    /// Partials name the speaker of settled frames only: the look-ahead's guess ("a fourth voice")
+    /// is often revised into a voice already heard, and must never reach a chip.
+    func testPartialsFollowSettledFramesOnly() {
+        var t = tracker()
+        feed(&t, seconds: 2.6)
+        t.update(transcript: "so as I was saying")
+        t.observe(SpeakerFrames(finalized: [run(0, 0.2, 2.0)], tentative: [run(3, 2.0, 2.6)]))
+        XCTAssertEqual(t.currentSpeaker, 0, "the look-ahead's #4 is not shown")
+        XCTAssertEqual(t.dominantSpeaker(from: Int(2.0 * 16_000), to: Int(2.6 * 16_000)), 3, "commits still see it")
+        XCTAssertTrue(t.takeSpeakerEvents().isEmpty)
+        // It settles as the first voice after all: a revision for the log, and no label changed.
+        feed(&t, seconds: 0.5)
+        t.observe(SpeakerFrames(finalized: [run(0, 2.0, 2.6)], tentative: [run(0, 2.6, 3.1)]))
+        XCTAssertEqual(t.currentSpeaker, 0)
+        XCTAssertEqual(t.takeSpeakerEvents().revisions, [.init(tentative: 3, settled: 0, at: Int(2.0 * 16_000))])
+        XCTAssertTrue(t.takeSpeakerEvents().isEmpty, "taken once")
+        // A new line with nothing settled yet has no speaker of its own (the engine keeps the last one).
+        feed(&t, seconds: 1.3, loud: false)
+        _ = t.commit(reason: .silence, speaker: .me, engine: "x", modelWillReset: true, stream: "me")
+        feed(&t, seconds: 0.5)
+        t.update(transcript: "next")
+        t.observe(SpeakerFrames(finalized: [], tentative: [run(1, 4.4, 4.9)]))
+        XCTAssertNil(t.currentSpeaker)
+        // Once frames settle, the line's only voice is shown at once…
+        feed(&t, seconds: 1.5)
+        t.observe(SpeakerFrames(finalized: [run(1, 4.4, 5.4)], tentative: []))
+        XCTAssertEqual(t.currentSpeaker, 1)
+        // …a second voice only once it has held the floor as long as a line cut needs (until
+        // then nil: the engine keeps showing the previous speaker)…
+        t.observe(SpeakerFrames(finalized: [run(2, 5.4, 5.8)], tentative: []))
+        XCTAssertNil(t.currentSpeaker, "a 0.4 s stint does not get a chip")
+        feed(&t, seconds: 0.5)
+        t.observe(SpeakerFrames(finalized: [run(2, 5.8, 6.2)], tentative: []))
+        XCTAssertEqual(t.currentSpeaker, 2)
+    }
+
+    func testSpeakerChangeReportsTheTurn() {
+        var t = tracker()
+        feed(&t, seconds: 3)
+        t.update(transcript: "hello from me")
+        t.observe(SpeakerFrames(finalized: [run(0, 0.3, 3.0)], tentative: []))
+        feed(&t, seconds: 1.3)
+        t.observe(SpeakerFrames(finalized: [run(1, 3.2, 4.3)], tentative: []))
+        XCTAssertEqual(t.finalReason(modelSignalledEnd: false), .speakerChange)
+        _ = t.commit(reason: .speakerChange, speaker: .me, engine: "x", modelWillReset: false, stream: "me")
+        XCTAssertEqual(t.takeSpeakerEvents().turns, [.init(from: 0, to: 1, at: Int(3.2 * 16_000), held: Int(1.1 * 16_000))])
+    }
+
     func testNoSpeakerIDWithoutAStream() {
         var t = tracker()
         feed(&t, seconds: 2)
@@ -271,6 +319,54 @@ final class SpeakerRosterTests: XCTestCase {
         r.note("me#1"); r.note("me#2")
         XCTAssertNotEqual(LaneColors.bright(v1, r), LaneColors.bright(v2, r))
         XCTAssertEqual(LaneColors.bright(v1, r), LaneColors.bright(.me), "the first speaker keeps the lane colour")
+    }
+
+    /// A voice seen only in partials so far is not numbered: it may still settle as someone else.
+    func testAVoiceWithoutALineHasNoNumber() {
+        var r = SpeakerRoster()
+        r.note("them:us.zoom.xos#1"); r.note("them:us.zoom.xos#2")
+        let newcomer = Voice(speaker: .them, app: "us.zoom.xos", speakerID: "them:us.zoom.xos#4")
+        XCTAssertTrue(r.isProvisional("them:us.zoom.xos#4"))
+        XCTAssertEqual(LaneColors.chipLabel(newcomer, r), "them · Zoom")
+        XCTAssertEqual(LaneColors.bright(newcomer, r), LaneColors.bright(.them), "the lane's own colour")
+        XCTAssertNil(r.map["them:us.zoom.xos#4"])
+        // On the microphone it must not read "me" (or your name) while others are numbered.
+        r.note("me#1"); r.note("me#2")
+        let mic = Voice(speaker: .me, speakerID: "me#3")
+        XCTAssertEqual(VoiceNames(yourName: "Aditya", roster: r).chipLabel(mic), "Speaker …")
+        // The very first voice of a stream is not provisional: it reads as the lone voice.
+        XCTAssertFalse(SpeakerRoster().isProvisional("me#1"))
+        XCTAssertEqual(LaneColors.chipLabel(Voice(speaker: .me, speakerID: "me#1"), SpeakerRoster()), "me")
+    }
+
+    /// The user's report: captions showed "Speaker 4", the file had no Speaker 4 lines, yet the
+    /// sidecar listed one. A speaker only joins the roster (live and on disk) with a line.
+    @MainActor
+    func testAPartialOnlySpeakerNeverReachesTheStore() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("hearsay-partial-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let t0 = Date(timeIntervalSince1970: 1_794_232_980)
+        let store = TranscriptStore(directory: tmp, startedAt: t0, engine: "e", debounce: 0, yourName: { nil })
+        let model = AppModel()
+        let session = SessionController(model: model)
+        session.attach(store: store)
+        let zen = "app.zen-browser.zen"
+        func line(_ offset: TimeInterval, _ slot: Int) -> TranscriptLine {
+            TranscriptLine(speaker: .them, sourceApp: zen, start: t0.addingTimeInterval(offset), end: t0.addingTimeInterval(offset + 2),
+                           text: "words \(offset)", engine: "e", speakerID: "them:\(zen)#\(slot)")
+        }
+        session.handle(.final(line(1, 1)))
+        session.handle(.final(line(4, 2)))
+        session.handle(.partial(text: "and then", speaker: .them, app: zen, speakerID: "them:\(zen)#4"))
+        XCTAssertEqual(model.partials[Voice(speaker: .them, app: zen, speakerID: "them:\(zen)#4")], "and then", "shown live")
+        XCTAssertEqual(model.speakers.order, ["them:\(zen)#1", "them:\(zen)#2"])
+        // …but those words settle as speaker 2's line.
+        session.handle(.final(line(7, 2)))
+        store.finish(at: t0.addingTimeInterval(60))
+        XCTAssertEqual(store.speakers.order, ["them:\(zen)#1", "them:\(zen)#2"])
+        let side = try TranscriptStore.jsonDecoder.decode(TranscriptStore.Sidecar.self, from: Data(contentsOf: store.jsonURL))
+        XCTAssertEqual(side.speakers, ["them:\(zen)#1": "Speaker 1", "them:\(zen)#2": "Speaker 2"])
+        XCTAssertEqual(Set(side.speakers?.keys.map { $0 } ?? []), Set(side.lines.compactMap(\.speakerID)), "every listed speaker has lines")
     }
 
     @MainActor
