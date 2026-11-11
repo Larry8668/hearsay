@@ -147,3 +147,43 @@ final class TranscriptLibraryTests: XCTestCase {
         XCTAssertEqual(model.partials.filter { !model.hiddenVoices.contains($0.key) }, [.me: "typing"])
     }
 }
+
+/// Bulk delete: one trash call for every file of every given transcript, never the live one's.
+final class TranscriptLibraryBulkDeleteTests: XCTestCase {
+    var tmp: URL!
+    override func setUp() {
+        tmp = FileManager.default.temporaryDirectory.appendingPathComponent("hearsay-bulk-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    }
+    override func tearDown() { try? FileManager.default.removeItem(at: tmp) }
+
+    func entry(_ name: String, srt: Bool = false) throws -> TranscriptLibrary.Entry {
+        let json = tmp.appendingPathComponent(name + ".json")
+        try Data("{}".utf8).write(to: json)
+        try Data("md".utf8).write(to: json.deletingPathExtension().appendingPathExtension("md"))
+        if srt { try Data("srt".utf8).write(to: json.deletingPathExtension().appendingPathExtension("srt")) }
+        return TranscriptLibrary.Entry(jsonURL: json, startedAt: Date(), endedAt: nil, engine: "e", lineCount: 1, apps: [],
+                                       pausedTotal: 0, lastLineEnd: Date())
+    }
+
+    func testFilesToTrashSkipsLiveAndMissingFiles() throws {
+        let a = try entry("a-\(UUID().uuidString)", srt: true), b = try entry("b-\(UUID().uuidString)"), live = try entry("live-\(UUID().uuidString)")
+        let urls = TranscriptLibrary.filesToTrash([a, live, b], except: live.jsonURL)
+        XCTAssertEqual(Set(urls), [a.jsonURL, a.markdownURL, a.srtURL, b.jsonURL, b.markdownURL])
+    }
+
+    @MainActor func testBulkDeleteMovesAllFilesAndKeepsLive() throws {
+        let a = try entry("hearsay-test-a-\(UUID().uuidString)", srt: true), b = try entry("hearsay-test-b-\(UUID().uuidString)")
+        let live = try entry("hearsay-test-live-\(UUID().uuidString)")
+        let done = expectation(description: "recycled")
+        var moved: [URL: URL] = [:]
+        TranscriptLibrary(directory: tmp).delete([a, b, live], except: live.jsonURL) { moved = $0; done.fulfill() }
+        wait(for: [done], timeout: 20)
+        defer { for t in moved.values { try? FileManager.default.removeItem(at: t) } }   // don't litter the user's Trash
+        let fm = FileManager.default
+        for u in [a.jsonURL, a.markdownURL, a.srtURL, b.jsonURL, b.markdownURL] { XCTAssertFalse(fm.fileExists(atPath: u.path), u.lastPathComponent) }
+        XCTAssertEqual(moved.count, 5)
+        XCTAssertTrue(fm.fileExists(atPath: live.jsonURL.path))
+        XCTAssertTrue(fm.fileExists(atPath: live.markdownURL.path))
+    }
+}

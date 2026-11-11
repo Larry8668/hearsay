@@ -12,10 +12,12 @@ struct MainContentView: View {
 
     var body: some View {
         Group {
-            switch state.selection {
-            case .live:
+            switch state.isBulk ? nil : state.selection {
+            case nil:
+                BulkSelectionView(state: state, actions: actions)
+            case .live?:
                 LiveContentView(model: model, state: state, firstRun: library.entries.isEmpty, tagSuggestions: library.allTags)
-            case .transcript(let url):
+            case .transcript(let url)?:
                 if let doc = state.document, doc.entry.jsonURL == url {
                     PastContentView(doc: doc, state: state, actions: actions, tagSuggestions: library.allTags)
                 } else {
@@ -201,6 +203,50 @@ struct PastContentView: View {
         .controlSize(.small)
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(Color.red.opacity(0.06))
+    }
+}
+
+/// Two or more transcripts picked in the sidebar: what they add up to, and the ways out. The
+/// Trash confirm is inline, as for one transcript.
+struct BulkSelectionView: View {
+    @ObservedObject var state: MainWindowState
+    let actions: MainWindow.ContentActions
+
+    var body: some View {
+        let es = state.bulkEntries
+        let lines = es.reduce(0) { $0 + $1.lineCount }
+        VStack(spacing: 0) {
+            if state.confirmingDelete {
+                HStack(spacing: 12) {
+                    Image(systemName: "trash").foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Move \(es.count) transcripts to the Trash?").font(.system(size: 13, weight: .medium))
+                        Text("Their .md and .json files; one Undo in Finder brings them back.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Cancel") { state.confirmingDelete = false }.keyboardShortcut(.cancelAction)
+                    Button("Move to Trash") { actions.deleteMany(es) }.keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent).tint(.red)
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Color.red.opacity(0.06))
+                Divider()
+            }
+            VStack(spacing: 14) {
+                Image(systemName: "square.stack.3d.up").font(.system(size: 34)).foregroundStyle(.secondary)
+                Text("\(es.count) transcripts selected").font(.title2.weight(.semibold))
+                Text("\(lines) line\(lines == 1 ? "" : "s") · \(TranscriptFormatter.duration(es.reduce(0) { $0 + $1.duration }))")
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button("Move to Trash", role: .destructive) { state.confirmingDelete = true }
+                    Button("Deselect") { state.pick([.live]) }
+                }
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 }
 
