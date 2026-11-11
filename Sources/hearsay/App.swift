@@ -170,6 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
+            "learnvoice": { [weak self] in self?.learnVoice() },
+            "enrolstart": { [weak self] in self?.enrolment.pressStart() },
             "about": { About.show() },
             "warn": { [weak self] in self?.session.showWarning("Microphone stopped.") },
             "pill": { [weak self] in self?.model.barMode = .pill },
@@ -323,15 +325,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                checksEnabled: updates.enabled, homebrew: UpdateChecker.installedWithHomebrew)
     }
 
-    /// Settings ▸ Tell speakers apart ▸ Learn my voice…: 10 s of the microphone, saved for the
-    /// diarizer to label the user "me" (see Enrolment).
+    /// Settings ▸ Tell speakers apart ▸ Learn my voice…: a passage read aloud for 15 s, saved for
+    /// the diarizer to label the user "me" (see Enrolment). The panel reports the outcome itself.
     private func learnVoice() {
         enrolment.start(canStart: model.phase == .idle) { [weak self] result in
             switch result {
             case .success(let speech):
-                self?.session.showWarning(String(format: "Voice learned (%.0f s of speech). From the next session on, you are \"me\".", speech))
+                Log.info(.diarize, String(format: "enrolment: voice learned, %.0f s of speech", speech))
             case .failure(let error):
-                self?.session.showWarning(error.localizedDescription)
+                if case EnrolmentRecorder.Failure.busy = error { self?.session.showWarning(error.localizedDescription) }
             }
             self?.refresh()
         }

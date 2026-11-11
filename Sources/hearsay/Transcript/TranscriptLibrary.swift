@@ -174,13 +174,26 @@ final class TranscriptLibrary: ObservableObject {
 
     /// Moves the transcript's files (.md, .json and an exported .srt) to the Trash. The folder
     /// watcher drops the entry from the list once the move is done.
-    func delete(_ entry: Entry) {
-        let urls = [entry.markdownURL, entry.jsonURL, entry.srtURL].filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard !urls.isEmpty else { return }
-        Log.info(.ui, "library: trashing \(entry.markdownURL.lastPathComponent)")
-        NSWorkspace.shared.recycle(urls) { _, error in
+    func delete(_ entry: Entry, except live: URL? = nil) { delete([entry], except: live) }
+
+    /// Several at once, in ONE `recycle` call so Finder offers a single Undo for the lot. `live`
+    /// is the running session's sidecar: its files are skipped, they are still being written.
+    /// `done` (tests) gets the original -> trashed URLs.
+    func delete(_ entries: [Entry], except live: URL? = nil, done: (([URL: URL]) -> Void)? = nil) {
+        let urls = Self.filesToTrash(entries, except: live)
+        guard !urls.isEmpty else { done?([:]); return }
+        Log.info(.ui, "library: trashing \(entries.count) transcript\(entries.count == 1 ? "" : "s") (\(urls.count) files)")
+        NSWorkspace.shared.recycle(urls) { moved, error in
             if let error = error { Log.error(.ui, "library: trash failed: \(error)") }
+            done?(moved)
         }
+    }
+
+    /// The .md / .json / .srt of each entry that exist on disk, minus the live session's.
+    nonisolated static func filesToTrash(_ entries: [Entry], except live: URL?) -> [URL] {
+        entries.filter { $0.jsonURL != live }
+            .flatMap { [$0.markdownURL, $0.jsonURL, $0.srtURL] }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 }
 

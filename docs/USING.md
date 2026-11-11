@@ -61,8 +61,9 @@ to the speech model and tells voices apart as they talk:
 
 Numbers are per session: *Speaker 1* in today's meeting is whoever spoke first, not the same person
 as yesterday's *Speaker 1*. To have your own voice recognised, use **Settings ▸ Tell speakers
-apart ▸ Learn my voice…** while not listening: a small panel counts down 10 seconds while you read
-anything aloud, and from the next session on your voice is labelled **me** and everyone else
+apart ▸ Learn my voice…** while not listening: a small panel shows three short sentences; press
+**Start** and read them aloud in your normal voice (15 seconds, with a level meter so you can see
+it hearing you). If it heard too little it says so and offers *Try again*. From the next session on your voice is labelled **me** and everyone else
 **Speaker 1, 2…**. The clip stays on this Mac (`~/Library/Application Support/hearsay/voice/me.wav`);
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
@@ -231,6 +232,15 @@ of its tags. New files appear as soon as they are saved. ⌃⌘S hides the sideb
 last keystroke): a transcript stays listed if the text appears in its title, a tag, a speaker's
 name or any of its lines, regardless of case. Esc clears it.
 
+**Selecting several, deleting in bulk.** ⌘-click toggles a transcript, ⇧-click extends a range,
+⌘A (sidebar focused) selects every transcript the list shows, so with a search active only the
+matches. *Live* never joins a multi-selection. With two or more selected the right-hand pane
+shows "3 transcripts selected" with their lines and total length, and *Move to Trash* /
+*Deselect*. Delete, that button, ⋯ ▸ *Move 3 Transcripts to Trash…* and right-click ▸ *Move to
+Trash* (on the clicked row, or the whole selection if the row is part of it) all ask first, inline.
+All the files go to the Trash in one step, so Finder's Undo (⌘Z) brings them back together; the
+running session's own file is never touched. Afterwards the row after the last one removed is shown.
+
 **Titles and tags.** The header of any transcript, the live one included, starts out as its date
 (or *Live transcript*); click it, or the pencil beside it, to give it a title: Enter saves, Esc
 cancels, an empty field goes back to the date. The date stays as the line underneath. Under that is
@@ -253,7 +263,8 @@ voice…*), or to the lane while it has only one voice.
 session runs), smaller / larger text, *Copy* (plain text, one timed line each), and under ⋯:
 *Export…*, *Export subtitles (.srt)*, *Copy as text* / *Copy as Markdown*, *Reveal in Finder*,
 *Open in editor* and, for a saved transcript, *Move to Trash…* (confirmed inline, under the
-header; the Markdown and JSON files go to the Trash together).
+header; the Markdown and JSON files go to the Trash together; with several selected it reads
+*Move N Transcripts to Trash…*).
 
 **Export.** *Export…* (also File ▸ Export…, ⌘E) opens a save panel with a format popup:
 **Markdown** (.md, the same layout as the saved file), **JSON** (.json, the sidecar's layout with
@@ -286,7 +297,7 @@ closed with ⌘W; the session carries on without it.
 While the window is open hearsay behaves like any Mac app: it has a Dock icon and the usual
 menus (**hearsay** ▸ About / Settings… ⌘, / Quit, **Edit**, **View** ▸ Toggle Sidebar ⌃⌘S and
 Larger / Smaller Text ⌘+ / ⌘−, **Window** ▸ Close ⌘W / Minimize ⌘M). ⌘C copies selected
-transcript text; Delete on a selected transcript in the sidebar asks to move it to the Trash. Close
+transcript text; Delete on the selected transcript(s) in the sidebar asks to move them to the Trash. Close
 the window and hearsay is back to the menu bar only (the recording bar is never hidden by ⌘H).
 
 If a permission was refused, or a source stopped, a yellow line under the live transcript's header
