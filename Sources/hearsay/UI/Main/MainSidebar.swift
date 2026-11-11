@@ -69,7 +69,7 @@ final class MainWindowState: ObservableObject {
         editing = nil
         guard case .transcript(let url) = selection else { document = nil; return }
         document = TranscriptLibrary.load(url)
-        if document == nil { Log.warn("library: could not load \(url.lastPathComponent)") }
+        if document == nil { Log.warn(.ui, "library: could not load \(url.lastPathComponent)") }
     }
 
     func hidden(for url: URL) -> Set<Voice> { hiddenPast[url] ?? [] }

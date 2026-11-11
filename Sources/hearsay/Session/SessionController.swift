@@ -53,27 +53,27 @@ final class SessionController {
     init(model: AppModel) {
         self.model = model
         // Dev aid (like HEARSAY_AUTOSTART): with HEARSAY_AUTOMATION=1, end-to-end tests drive the
-        // session by posting the distributed notification "dev.hearsay.control" with object
+        // session by posting the distributed notification "dev.hearsay.control" (".dev" suffix in dev mode, so only the dev instance obeys) with object
         // "toggle" (⌃⌥H) or "pause" (⌃⌥P); synthesized key events don't reach Carbon hotkeys.
         guard ProcessInfo.processInfo.environment["HEARSAY_AUTOMATION"] == "1" else { return }
         DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("dev.hearsay.control"), object: nil, queue: .main
+            forName: Notification.Name(DevMode.controlNotificationName(dev: DevMode.isDev)), object: nil, queue: .main
         ) { [weak self] note in
             let what = note.object as? String
-            Log.info("automation: \(what ?? "?")")
+            Log.info(.session, "automation: \(what ?? "?")")
             MainActor.assumeIsolated { if what == "toggle" { self?.toggle() } else if what == "pause" { self?.togglePause() } }
         }
     }
 
     // MARK: Source preferences
 
-    static func isEnabled(_ s: Speaker) -> Bool { UserDefaults.standard.object(forKey: "source.\(s.rawValue)") as? Bool ?? true }
+    static func isEnabled(_ s: Speaker) -> Bool { Prefs.store.object(forKey: "source.\(s.rawValue)") as? Bool ?? true }
 
     /// Persists the choice and, mid-session, starts or stops just that speaker so the transcript
     /// file carries on.
     func setEnabled(_ s: Speaker, _ on: Bool) {
-        UserDefaults.standard.set(on, forKey: "source.\(s.rawValue)")
-        Log.info("source \(s.rawValue) \(on ? "enabled" : "disabled")")
+        Prefs.store.set(on, forKey: "source.\(s.rawValue)")
+        Log.info(.session, "source \(s.rawValue) \(on ? "enabled" : "disabled")")
         // While paused only the preference changes; resume() starts whatever is enabled then.
         guard model.phase == .listening else { onChange(); return }
         Task {
@@ -151,12 +151,12 @@ final class SessionController {
         prepareTask = Task {
             do {
                 for engine in engines { try await engine.prepare(progress: report) }
-                Log.info("engines ready: \(model.engineID)")
+                Log.info(.model, "engines ready: \(model.engineID)")
                 model.modelState = .ready; enginesReady = true
             } catch is CancellationError {
                 // The user paused or cancelled the download (pauseDownload / cancelDownload).
                 model.modelState = downloadIntent == .cancel ? .notDownloaded : .paused(fraction: downloadFraction)
-                Log.info("model download \(downloadIntent == .cancel ? "cancelled" : "paused at \(Int(max(0, downloadFraction) * 100))%")")
+                Log.info(.model, "model download \(downloadIntent == .cancel ? "cancelled" : "paused at \(Int(max(0, downloadFraction) * 100))%")")
                 startWhenReady = false
                 if model.phase == .starting { model.phase = .idle }
             } catch {
@@ -166,7 +166,7 @@ final class SessionController {
                     if model.phase == .starting { model.phase = .idle }
                     prepareTask = nil; onChange(); return
                 }
-                Log.error("engine prepare failed: \(error)")
+                Log.error(.engine, "engine prepare failed: \(error)")
                 model.modelState = .failed(error.localizedDescription)
                 startWhenReady = false
                 if model.phase == .starting { model.phase = .idle }
@@ -235,7 +235,7 @@ final class SessionController {
     func start() {
         guard model.phase == .idle else { return }
         if !enginesReady {
-            Log.info("start requested before the model is ready; will start when it is")
+            Log.info(.session, "start requested before the model is ready; will start when it is")
             startWhenReady = true
             model.phase = .starting
             prepareEngines()
@@ -260,7 +260,9 @@ final class SessionController {
         model.audio.reset()
         model.audio.run()
         onChange()
-        Log.info("session: starting \(speakers.map(\.rawValue))")
+        Log.info(.session, "session: starting \(speakers.map(\.rawValue))")
+        Log.info(.session, Log.sessionStartLine(at: now, sources: speakers.map(\.rawValue), engine: model.engineID,
+                                                echo: EchoCancellation.current.rawValue))
         echo = EchoFilter()
         levelHistory.clear()
         startTask = Task {
@@ -268,7 +270,7 @@ final class SessionController {
             await startLanes(speakers)
             startTask = nil
             if lanes.isEmpty {
-                Log.warn("session: no source could start")
+                Log.warn(.session, "session: no source could start")
                 store = previous
                 model.phase = .idle
                 model.audio.reset()
@@ -287,7 +289,8 @@ final class SessionController {
         guard model.isActive else { return stopTask }
         model.phase = .stopping
         onChange()
-        Log.info("session: stopping")
+        Log.info(.session, "session: stopping")
+        let ended = store
         let pending = [startTask, pauseTask]
         stopTask = Task {
             for t in pending { await t?.value }
@@ -300,7 +303,11 @@ final class SessionController {
             model.phase = .idle
             stopTask = nil
             onChange()
-            Log.info("session: stopped")
+            Log.info(.session, "session: stopped")
+            if let st = ended {
+                Log.info(.session, Log.sessionEndLine(duration: Date().timeIntervalSince(st.startedAt), lines: st.lines.count,
+                                                      saved: st.hasFile ? st.markdownURL.lastPathComponent : nil))
+            }
         }
         return stopTask
     }
@@ -316,7 +323,7 @@ final class SessionController {
         model.phase = .paused
         model.audio.freeze()
         onChange()
-        Log.info("session: pausing")
+        Log.info(.session, "session: pausing")
         let previous = pauseTask
         pauseTask = Task {
             await previous?.value
@@ -324,7 +331,7 @@ final class SessionController {
             model.partials = [:]
             echo.resetMe()
             pauseTask = nil
-            Log.info("session: paused")
+            Log.info(.session, "session: paused")
         }
     }
 
@@ -339,7 +346,7 @@ final class SessionController {
         model.phase = .starting
         model.audio.run()
         onChange()
-        Log.info("session: resuming")
+        Log.info(.session, "session: resuming")
         let previous = pauseTask
         pauseTask = Task {
             await previous?.value
@@ -350,11 +357,11 @@ final class SessionController {
             if lanes.isEmpty {
                 // Nothing could start (both sources off, permission revoked): end the session
                 // rather than pretend to listen.
-                Log.warn("session: resume found no source to start; stopping")
+                Log.warn(.session, "session: resume found no source to start; stopping")
                 stop()
             } else if model.phase == .starting {
                 model.phase = .listening
-                Log.info("session: resumed")
+                Log.info(.session, "session: resumed")
             }
             onChange()
         }
@@ -373,7 +380,7 @@ final class SessionController {
         guard let task = stop() else { finish(); return }
         Task { await task.value; finish() }
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
-            if !done { Log.warn("session: stop timed out after \(timeout) s; finalising anyway") }
+            if !done { Log.warn(.session, "session: stop timed out after \(timeout) s; finalising anyway") }
             finish()
         }
     }

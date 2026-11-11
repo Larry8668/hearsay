@@ -82,7 +82,7 @@ private enum TCC {
 
     private static let handle: UnsafeMutableRawPointer? = {
         let h = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW)
-        if h == nil { Log.warn("permissions: TCC.framework not loadable; system-audio status unknown") }
+        if h == nil { Log.warn(.tap, "permissions: TCC.framework not loadable; system-audio status unknown") }
         return h
     }()
 
@@ -91,7 +91,7 @@ private enum TCC {
 
     private static func symbol<T>(_ name: String) -> T? {
         guard let handle, let sym = dlsym(handle, name) else {
-            Log.warn("permissions: \(name) not found in TCC.framework")
+            Log.warn(.tap, "permissions: \(name) not found in TCC.framework")
             return nil
         }
         return unsafeBitCast(sym, to: T.self)

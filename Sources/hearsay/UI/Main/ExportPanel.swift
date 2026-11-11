@@ -10,8 +10,8 @@ enum ExportPanel {
     private static let formatKey = "exportFormat"
 
     static var lastFormat: ExportFormat {
-        get { ExportFormat(rawValue: UserDefaults.standard.string(forKey: formatKey) ?? "") ?? .markdown }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: formatKey) }
+        get { ExportFormat(rawValue: Prefs.store.string(forKey: formatKey) ?? "") ?? .markdown }
+        set { Prefs.store.set(newValue.rawValue, forKey: formatKey) }
     }
 
     /// As a sheet on `window` when there is one (the main window), else a standalone panel.

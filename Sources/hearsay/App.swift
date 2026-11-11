@@ -12,7 +12,7 @@ enum Main {
         //   open -W -n --stdout out.txt build/hearsay.app --args --audio-probe system
         if args.first == "--audio-probe" { exit(AudioProbe.run(arguments: Array(args.dropFirst()))) }
         if args.first == "--transcribe" { exit(EngineProbe.run(arguments: Array(args.dropFirst()))) }
-        Log.start(role: "app")
+        Log.start(role: DevMode.isDev ? "app (dev)" : "app")
 
         // SIGTERM/SIGINT (pkill, the Homebrew update script, logout, Ctrl-C) → a normal quit, so the
         // running session is stopped and the transcript's header gets its end time and duration.
@@ -34,11 +34,15 @@ enum Main {
         // for a quitting instance (Relaunch, Homebrew update) before giving up. LaunchServices keeps
         // listing a dead process for a few seconds, so confirm each candidate with kill(pid, 0).
         let me = getpid()
+        // Only a copy at the same bundle path blocks us; a dev build runs beside /Applications/hearsay.app.
         func others() -> [NSRunningApplication] {
-            NSRunningApplication.runningApplications(withBundleIdentifier: "dev.hearsay.app")
+            let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.hearsay.app")
                 .filter { $0.processIdentifier != me && !$0.isTerminated && kill($0.processIdentifier, 0) == 0 }
                 // A CLI diagnostic run of the same binary (--audio-probe …) never becomes a UI app.
                 .filter { $0.activationPolicy != .prohibited }
+            let blocking = Set(InstanceGuard.conflicts(running: candidates.compactMap { $0.bundleURL },
+                                                       mine: Bundle.main.bundleURL, dev: DevMode.isDev).map { $0.standardizedFileURL.path })
+            return candidates.filter { $0.bundleURL.map { blocking.contains($0.standardizedFileURL.path) } ?? false }
         }
         var waited = 0.0
         while !others().isEmpty && waited < 3 { Thread.sleep(forTimeInterval: 0.1); waited += 0.1 }
@@ -125,11 +129,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session.onChange = { [weak self] in self?.refresh() }
         mainWindow.onVisibilityChange = { [weak self] in self?.refresh() }
         hotkey.register { [weak self] in
-            Log.info("hotkey \(Hotkey.toggleListening.display)")
+            Log.info(.ui, "hotkey \(Hotkey.toggleListening.display)")
             self?.session.toggle()
         }
         pauseHotkey.register { [weak self] in
-            Log.info("hotkey \(Hotkey.togglePause.display)")
+            Log.info(.ui, "hotkey \(Hotkey.togglePause.display)")
             self?.session.togglePause()
         }
         updates.onChange = { [weak self] in self?.refreshVersion() }
@@ -157,6 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "pause": { [weak self] in self?.session.togglePause() },
             "captions": { [weak self] in self?.bar.toggleCaptions() },
             "pauseDownload": { [weak self] in self?.session.pauseDownload() },
+            // HEARSAY_DIAGNOSTICS_OUT=/path.zip: Export diagnostics without the save panel.
+            "diagnostics": {
+                let out = ProcessInfo.processInfo.environment["HEARSAY_DIAGNOSTICS_OUT"] ?? NSTemporaryDirectory() + "hearsay-diagnostics.zip"
+                do { try Diagnostics.export(to: URL(fileURLWithPath: out)) } catch { Log.error(.app, "diagnostics export failed: \(error)") }
+            },
+            "verbose": { Log.verboseText.toggle() },
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
@@ -183,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !quitting else { return .terminateLater }
         guard model.phase != .idle else { return .terminateNow }
         quitting = true
-        Log.info("quit: stopping session first")
+        Log.info(.session, "quit: stopping session first")
         session.stopForQuit(timeout: 4) { NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
@@ -191,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         hotkey.unregister()
         pauseHotkey.unregister()
-        Log.info("quit")
+        Log.info(.session, "quit")
     }
 
     // MARK: Menu
@@ -359,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func relaunch() {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open -n \"\(Bundle.main.bundleURL.path)\""]
+        task.arguments = ["-c", "sleep 1; /usr/bin/open -n \(DevMode.isDev ? "--env HEARSAY_DEV=1 " : "")\"\(Bundle.main.bundleURL.path)\""]
         try? task.run()
         NSApp.terminate(nil)
     }

@@ -22,8 +22,8 @@ final class UpdateChecker {
     private let defaultsKey = "checkForUpdates"
 
     var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
+        get { Prefs.store.object(forKey: defaultsKey) as? Bool ?? true }
+        set { Prefs.store.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
     }
 
     static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0" }
@@ -59,7 +59,7 @@ final class UpdateChecker {
             }
             DispatchQueue.main.async {
                 self?.status = result
-                Log.info("update check: \(result)")
+                Log.info(.update, "update check: \(result)")
                 self?.onChange?()
             }
         }.resume()
@@ -104,10 +104,10 @@ final class UpdateChecker {
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-            Log.info("update: opening \(url.path) in Terminal")
+            Log.info(.update, "update: opening \(url.path) in Terminal")
             NSWorkspace.shared.open(url)
         } catch {
-            Log.error("update: could not write script: \(error)")
+            Log.error(.update, "update: could not write script: \(error)")
             copyCommand()
         }
     }

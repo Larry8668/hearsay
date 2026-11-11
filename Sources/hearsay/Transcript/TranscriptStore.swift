@@ -10,12 +10,11 @@ import AppKit
 ///
 /// Main thread only. File I/O happens on a private serial queue so it never blocks the UI.
 final class TranscriptStore {
-    /// `~/Documents/hearsay`. Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
+    /// `~/Documents/hearsay` (`hearsay-dev` in dev mode). Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
     /// elsewhere, so unattended runs never touch the user's own transcripts.
     static var defaultDirectory: URL {
-        if let dir = ProcessInfo.processInfo.environment["HEARSAY_TRANSCRIPTS_DIR"], !dir.isEmpty { return URL(fileURLWithPath: dir, isDirectory: true) }
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("hearsay", isDirectory: true)
+        DevMode.transcriptsDirectory(dev: DevMode.isDev, environment: ProcessInfo.processInfo.environment,
+                                     documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
     }
 
     let directory: URL
@@ -140,11 +139,11 @@ final class TranscriptStore {
         endPause(at: end)
         endedAt = end
         writePending = false
-        guard !lines.isEmpty else { Log.info("transcript: no lines, nothing saved"); return }
+        guard !lines.isEmpty else { Log.info(.session, "transcript: no lines, nothing saved"); return }
         let snapshot = render()
         io.sync { TranscriptStore.write(snapshot) }
         hasFile = true
-        Log.info("transcript: finalised \(markdownURL.lastPathComponent) (\(lines.count) lines)")
+        Log.info(.session, "transcript: finalised \(markdownURL.lastPathComponent) (\(lines.count) lines)")
     }
 
     private func scheduleWrite() {
@@ -248,7 +247,7 @@ final class TranscriptStore {
             try Data(s.markdown.utf8).write(to: s.md, options: .atomic)
             try s.sidecar.write(to: s.json, options: .atomic)
         } catch {
-            Log.error("transcript: write failed for \(s.md.path): \(error)")
+            Log.error(.session, "transcript: write failed for \(s.md.path): \(error)")
         }
     }
 
@@ -283,10 +282,10 @@ final class TranscriptStore {
         do {
             try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(formatter.srt(lines: lines, start: start).utf8).write(to: url, options: .atomic)
-            Log.info("transcript: exported \(url.lastPathComponent)")
+            Log.info(.session, "transcript: exported \(url.lastPathComponent)")
             return url
         } catch {
-            Log.error("transcript: SRT export failed: \(error)")
+            Log.error(.session, "transcript: SRT export failed: \(error)")
             return nil
         }
     }

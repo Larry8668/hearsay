@@ -7,7 +7,7 @@ import SwiftUI
 /// the download bar moves and the mic row flips to "Allowed" live.
 final class WelcomeWindow: NSObject, NSWindowDelegate {
     static let shownKey = "welcomeShown"
-    static var shouldShowAutomatically: Bool { !UserDefaults.standard.bool(forKey: shownKey) }
+    static var shouldShowAutomatically: Bool { !Prefs.store.bool(forKey: shownKey) }
 
     private let model: AppModel
     private var window: NSWindow?
@@ -17,7 +17,7 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
     var isVisible: Bool { window?.isVisible ?? false }
 
     func show() {
-        UserDefaults.standard.set(true, forKey: Self.shownKey)
+        Prefs.store.set(true, forKey: Self.shownKey)
         WelcomeWindow.refreshMic(model)
         if let w = window { NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentViewController: NSHostingController(rootView: WelcomeView(model: model)))
@@ -32,7 +32,7 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
         window = w
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
-        Log.info("welcome shown (mic \(model.micAuthorized ? "allowed" : "not allowed"), model \(model.modelState))")
+        Log.info(.ui, "welcome shown (mic \(model.micAuthorized ? "allowed" : "not allowed"), model \(model.modelState))")
     }
 
     func close() { window?.close() }
@@ -47,9 +47,9 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
     static func requestMic(_ model: AppModel) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .notDetermined:
-            Log.info("welcome: requesting microphone access")
+            Log.info(.ui, "welcome: requesting microphone access")
             AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Log.info("microphone access \(granted ? "granted" : "denied")")
+                Log.info(.ui, "microphone access \(granted ? "granted" : "denied")")
                 DispatchQueue.main.async { refreshMic(model) }
             }
         case .authorized: refreshMic(model)

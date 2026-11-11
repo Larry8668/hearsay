@@ -90,7 +90,7 @@ final class TranscriptLibrary: ObservableObject {
             src.resume()
             watcher = src
         } else {
-            Log.warn("library: cannot watch \(directory.path)")
+            Log.warn(.ui, "library: cannot watch \(directory.path)")
         }
         reload()
     }
@@ -177,9 +177,9 @@ final class TranscriptLibrary: ObservableObject {
     func delete(_ entry: Entry) {
         let urls = [entry.markdownURL, entry.jsonURL, entry.srtURL].filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !urls.isEmpty else { return }
-        Log.info("library: trashing \(entry.markdownURL.lastPathComponent)")
+        Log.info(.ui, "library: trashing \(entry.markdownURL.lastPathComponent)")
         NSWorkspace.shared.recycle(urls) { _, error in
-            if let error = error { Log.error("library: trash failed: \(error)") }
+            if let error = error { Log.error(.ui, "library: trash failed: \(error)") }
         }
     }
 }

@@ -54,7 +54,7 @@ final class Resampler16k {
         let frames = Int(buffer.frameLength)
         guard frames > 0, let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
         guard buffer.format.commonFormat == .pcmFormatFloat32, let src = buffer.floatChannelData else {
-            if !warnedUnsupported { warnedUnsupported = true; Log.warn("audio: unsupported sample format \(buffer.format); dropping audio") }
+            if !warnedUnsupported { warnedUnsupported = true; Log.warn(.mic, "audio: unsupported sample format \(buffer.format); dropping audio") }
             return nil
         }
         let channels = Int(buffer.format.channelCount)
@@ -94,7 +94,7 @@ final class Resampler16k {
             return mono
         }
         if status == .error {
-            Log.warn("audio: resample failed: \(error?.localizedDescription ?? "unknown")")
+            Log.warn(.mic, "audio: resample failed: \(error?.localizedDescription ?? "unknown")")
             return []
         }
         return Array(UnsafeBufferPointer(start: out.floatChannelData![0], count: Int(out.frameLength)))
@@ -130,7 +130,7 @@ final class ChunkAssembler {
                 let expected = anchor.addingTimeInterval(Double(counted) / AudioChunk.sampleRate)
                 let drift = startTime.timeIntervalSince(expected)
                 if drift > gapTolerance {
-                    Log.info("audio[\(speaker.rawValue)]: \(String(format: "%.0f", drift * 1000)) ms gap in device clock; re-anchoring")
+                    Log.info(.mic, "audio[\(speaker.rawValue)]: \(String(format: "%.0f", drift * 1000)) ms gap in device clock; re-anchoring")
                     if !pending.isEmpty { out.append(makeChunk(pending, offset: emitted, apps: sourceApps)) }
                     pending.removeAll(keepingCapacity: true)
                     self.anchor = startTime; emitted = 0

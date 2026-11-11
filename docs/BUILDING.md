@@ -27,10 +27,43 @@ terminal.
 
 ## Logs
 
-- File: `~/Library/Logs/hearsay/hearsay.log` (Troubleshooting ▸ Open logs)
+- File: `~/Library/Logs/hearsay/hearsay.log` (`hearsay-dev.log` for a dev build; Troubleshooting ▸ Open logs).
+  Lines read `time [LEVEL] [category] message`; categories: mic, tap, engine, session, ui, update,
+  model, diarize, app (also the os_log category). `Log.info(.mic, "…")`; a call without a category is `app`.
+  Each session is bracketed by `===== session start … =====` / `===== session end … =====` lines.
+- Rotation: the live file plus 3 rolled copies (`.1` newest … `.3` oldest), rolled at 5 MB (~20 MB cap per
+  flavour). At launch everything else in the folder is deleted, and so are rolled files older than 30 days.
+- Spoken text is not logged (only word counts) unless Troubleshooting ▸ "Verbose logging (includes transcript
+  text)" is on (`verboseLogging` in `Prefs.store`, default off).
+- Troubleshooting ▸ "Export diagnostics…" saves `hearsay-diagnostics-<date>.zip` with the log files and a
+  `report.txt` (versions, permissions, settings, audio devices, model folder, transcript count; no
+  transcript text). For scripts: `HEARSAY_UI_SCRIPT=diagnostics@5 HEARSAY_DIAGNOSTICS_OUT=/tmp/d.zip`.
 - Unified log: `/usr/bin/log show --last 5m --info --predicate 'subsystem == "dev.hearsay.app"'`
   (use the full path: `log` is also a zsh builtin)
 - `HEARSAY_VERBOSE=1` also mirrors the log to stderr.
+
+## Dev build alongside the installed app
+
+A build that is not `/Applications/hearsay.app` runs in **dev mode** and can run at the same time as
+the Homebrew-installed app, so you never have to quit your real session to test. Dev mode is on when
+the bundle is not under `/Applications`, or when `HEARSAY_DEV=1` is in the environment.
+`make run` launches with `open --env HEARSAY_DEV=1`, so a repo launch is dev mode even if you copied
+the build into `/Applications` by hand.
+
+| | installed | dev |
+|---|---|---|
+| single-instance guard | blocks a second copy of the same bundle path | same; ignores the installed app |
+| status item | waveform icon | waveform icon plus a small "dev" label; menu starts with "hearsay dev build · version" |
+| hotkeys | ⌃⌥H listen, ⌃⌥P pause | ⌃⌥⇧H, ⌃⌥⇧P |
+| preferences | `dev.hearsay.app` | `dev.hearsay.app.dev` (`defaults read dev.hearsay.app.dev`) |
+| transcripts | `~/Documents/hearsay` | `~/Documents/hearsay-dev` (`HEARSAY_TRANSCRIPTS_DIR` still wins) |
+| log | `~/Library/Logs/hearsay/hearsay.log` | `~/Library/Logs/hearsay/hearsay-dev.log` |
+| `HEARSAY_AUTOMATION=1` notification | `dev.hearsay.control` | `dev.hearsay.control.dev` |
+
+The model folder (`~/Library/Application Support/hearsay/models`) is shared. Both copies may capture
+the microphone and the system tap at once; each tap excludes only its own process. The CLI probes
+(`--audio-probe`, `--transcribe`) never count as running instances. Two copies of the same path
+(for example two `build/hearsay.app`) are still refused; Relaunch waits for the old one to quit.
 
 ## Development aids
 

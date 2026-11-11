@@ -12,7 +12,7 @@ enum DebugSnapshot {
         guard let path = ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_DIR"], !path.isEmpty else { return }
         let dir = URL(fileURLWithPath: path, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        Log.info("debug snapshots → \(dir.path)")
+        Log.info(.ui, "debug snapshots → \(dir.path)")
         // HEARSAY_SNAPSHOT_INTERVAL=0.25 catches short-lived states (an empty transcript at start).
         let every = Double(ProcessInfo.processInfo.environment["HEARSAY_SNAPSHOT_INTERVAL"] ?? "") ?? 2
         let t = Timer(timeInterval: max(0.1, every), repeats: true) { _ in
@@ -108,7 +108,7 @@ enum DebugSnapshot {
             let call = parts[0].split(separator: "=", maxSplits: 1).map(String.init)
             guard let name = call.first, let action = actions[name] else { continue }
             DispatchQueue.main.asyncAfter(deadline: .now() + at) {
-                Log.info("ui script: \(parts[0])")
+                Log.info(.ui, "ui script: \(parts[0])")
                 scriptArgument = call.count > 1 ? call[1] : ""
                 action()
             }

@@ -132,10 +132,10 @@ struct VoiceNames: Equatable, Sendable {
 
     /// The global default for "me", in UserDefaults; blank is stored as nothing.
     static var storedYourName: String? {
-        get { TranscriptMeta.cleanTitle(UserDefaults.standard.string(forKey: yourNameKey)) }
+        get { TranscriptMeta.cleanTitle(Prefs.store.string(forKey: yourNameKey)) }
         set {
-            if let n = TranscriptMeta.cleanTitle(newValue) { UserDefaults.standard.set(n, forKey: yourNameKey) }
-            else { UserDefaults.standard.removeObject(forKey: yourNameKey) }
+            if let n = TranscriptMeta.cleanTitle(newValue) { Prefs.store.set(n, forKey: yourNameKey) }
+            else { Prefs.store.removeObject(forKey: yourNameKey) }
         }
     }
 }

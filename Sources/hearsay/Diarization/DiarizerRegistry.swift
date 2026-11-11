@@ -8,8 +8,8 @@ enum DiarizationMode: String, CaseIterable, Sendable {
 
     static let key = "diarization"
     static var current: DiarizationMode {
-        get { UserDefaults.standard.string(forKey: key).flatMap(DiarizationMode.init) ?? .microphone }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+        get { Prefs.store.string(forKey: key).flatMap(DiarizationMode.init) ?? .microphone }
+        set { Prefs.store.set(newValue.rawValue, forKey: key) }
     }
 
     var title: String {
