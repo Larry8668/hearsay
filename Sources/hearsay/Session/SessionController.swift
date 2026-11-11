@@ -41,6 +41,11 @@ final class SessionController {
     let levelHistory = LevelHistory()
     /// Every engine finished `prepare` (the model state can read .ready while the second is still loading).
     private var enginesReady = false
+    /// Last download progress seen, so a pause can show "paused at 43%".
+    private var downloadFraction: Double = -1
+    private enum DownloadIntent { case pause, cancel }
+    /// Set by pauseDownload / cancelDownload until the prepare task has reacted.
+    private var downloadIntent: DownloadIntent?
     var warningToken = 0
     /// Current session's transcript, or the last one after stop (for Open / Copy).
     private(set) var store: TranscriptStore?
@@ -92,12 +97,25 @@ final class SessionController {
         let report: @Sendable (ModelState) -> Void = { [weak self] state in
             Task { @MainActor in self?.applyProgress(state) }
         }
+        downloadIntent = nil
         prepareTask = Task {
             do {
                 for engine in engines { try await engine.prepare(progress: report) }
                 Log.info("engines ready: \(model.engineID)")
                 model.modelState = .ready; enginesReady = true
+            } catch is CancellationError {
+                // The user paused or cancelled the download (pauseDownload / cancelDownload).
+                model.modelState = downloadIntent == .cancel ? .notDownloaded : .paused(fraction: downloadFraction)
+                Log.info("model download \(downloadIntent == .cancel ? "cancelled" : "paused at \(Int(max(0, downloadFraction) * 100))%")")
+                startWhenReady = false
+                if model.phase == .starting { model.phase = .idle }
             } catch {
+                if downloadIntent != nil {   // whatever the download threw while we were stopping it
+                    model.modelState = downloadIntent == .cancel ? .notDownloaded : .paused(fraction: downloadFraction)
+                    startWhenReady = false
+                    if model.phase == .starting { model.phase = .idle }
+                    prepareTask = nil; onChange(); return
+                }
                 Log.error("engine prepare failed: \(error)")
                 model.modelState = .failed(error.localizedDescription)
                 startWhenReady = false
@@ -112,8 +130,39 @@ final class SessionController {
     private func applyProgress(_ state: ModelState) {
         // Once ready, ignore late progress callbacks (they hop here asynchronously).
         guard model.modelState != .ready, model.modelState != state else { return }
+        if case .downloading(let f) = state, f >= 0 { downloadFraction = f }
+        // While a pause/cancel is in flight, late "downloading" ticks must not overwrite it.
+        if downloadIntent != nil, prepareTask == nil { return }
         model.modelState = state
         onChange()
+    }
+
+    // MARK: Model download controls
+
+    /// Stops the download, keeping the partial files; `resumeDownload` (or Start listening)
+    /// continues from the same point.
+    func pauseDownload() {
+        guard prepareTask != nil, downloadIntent == nil else { return }
+        downloadIntent = .pause
+        Task { await ModelStore.shared.pauseDownload(ParakeetEngine.configuredVariant()) }
+    }
+
+    func resumeDownload() {
+        guard prepareTask == nil, !enginesReady else { return }
+        prepareEngines()
+    }
+
+    /// Stops the download and deletes the partial files. The welcome window offers to download again.
+    func cancelDownload() {
+        let variant = ParakeetEngine.configuredVariant()
+        downloadIntent = .cancel
+        Task {
+            await ModelStore.shared.cancelDownload(variant)
+            if prepareTask == nil {   // nothing was in flight (paused earlier): just report the clean state
+                model.modelState = .notDownloaded
+                onChange()
+            }
+        }
     }
 
     // MARK: Start / stop
@@ -149,6 +198,7 @@ final class SessionController {
         model.startedAt = now
         model.lines = []
         model.partials = [:]
+        model.hiddenVoices = []     // a fresh session shows every voice again
         model.pausedTotal = 0
         model.pausedAt = nil
         model.permissionDenied = []

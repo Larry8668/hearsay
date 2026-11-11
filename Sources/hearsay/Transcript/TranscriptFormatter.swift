@@ -57,12 +57,24 @@ struct TranscriptFormatter {
     /// "Mon 9 Nov 2026, 14:03–14:41 (38 min)", or "(38 min, 4 min paused)" when there were pauses.
     /// The first figure is wall-clock time, matching the range shown next to it.
     func headerRange(start: Date, end: Date?, pauses: [PauseInterval] = []) -> String {
+        guard let end = end else { return dateRange(start: start, end: nil) }
+        return "\(dateRange(start: start, end: end)) (\(lengthText(start: start, end: end, pauses: pauses)))"
+    }
+
+    /// "Mon 9 Nov 2026, 14:03–14:41", or "Mon 9 Nov 2026, 14:03 – in progress" (the main window's
+    /// title for a transcript).
+    func dateRange(start: Date, end: Date?) -> String {
         let day = format(start, "EEE d MMM yyyy")
         guard let end = end else { return "\(day), \(format(start, "HH:mm")) – in progress" }
+        return "\(day), \(format(start, "HH:mm"))–\(format(end, "HH:mm"))"
+    }
+
+    /// "38 min", or "38 min, 4 min paused".
+    func lengthText(start: Date, end: Date, pauses: [PauseInterval] = []) -> String {
         var length = TranscriptFormatter.duration(end.timeIntervalSince(start))
         let paused = pauses.reduce(0) { $0 + $1.length(now: end) }
         if paused >= 0.5 { length += ", \(TranscriptFormatter.shortDuration(paused)) paused" }
-        return "\(day), \(format(start, "HH:mm"))–\(format(end, "HH:mm")) (\(length))"
+        return length
     }
 
     /// Like `duration`, but seconds under a minute ("40 s"): a pause is often brief, and

@@ -76,6 +76,28 @@ actor ModelStore {
     }
 
     private var downloads: [StreamingModelVariant: Task<Void, Error>] = [:]
+
+    /// Stops an in-flight download, keeping its `.partial` files: FluidAudio downloads with
+    /// byte-range resume, so the next `ensureDownloaded` continues from where this one stopped.
+    /// Every caller awaiting the download gets a `CancellationError`.
+    func pauseDownload(_ variant: StreamingModelVariant) {
+        guard let task = downloads[variant] else { return }
+        Log.info("models: pausing download of \(variant.rawValue)")
+        task.cancel()
+    }
+
+    /// Stops the download and deletes what it fetched so far (nothing of the variant stays on disk).
+    func cancelDownload(_ variant: StreamingModelVariant) async {
+        if let task = downloads[variant] {
+            Log.info("models: cancelling download of \(variant.rawValue)")
+            task.cancel()
+            _ = try? await task.value
+        }
+        let dir = Self.directory(for: variant)
+        if FileManager.default.fileExists(atPath: dir.path) {
+            do { try FileManager.default.removeItem(at: dir) } catch { Log.warn("models: could not remove \(dir.path): \(error)") }
+        }
+    }
     private var spare: [StreamingModelVariant: [any StreamingAsrManager]] = [:]
 
     /// Makes sure the variant is on disk, downloading it once if needed. Concurrent callers share
@@ -84,7 +106,7 @@ actor ModelStore {
         if Self.isDownloaded(variant) { progress(.ready); return }
         if let task = downloads[variant] {
             progress(.downloading(fraction: -1))
-            return try await task.value
+            return try await Self.awaitDownload(task)
         }
         let task = Task {
             let started = Date()
@@ -100,8 +122,17 @@ actor ModelStore {
         }
         downloads[variant] = task
         defer { downloads[variant] = nil }
-        try await task.value
+        try await Self.awaitDownload(task)
         progress(.ready)
+    }
+
+    /// A paused/cancelled download surfaces as `CancellationError` whatever FluidAudio threw on
+    /// the way out (URLError.cancelled, a wrapped retry error), so callers can tell it from a failure.
+    private static func awaitDownload(_ task: Task<Void, Error>) async throws {
+        do { try await task.value } catch {
+            if task.isCancelled { throw CancellationError() }
+            throw error
+        }
     }
 
     /// A loaded, reset manager for one engine. Call `ensureDownloaded` first; this never downloads.

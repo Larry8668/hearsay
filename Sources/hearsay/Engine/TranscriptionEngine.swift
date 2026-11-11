@@ -15,6 +15,9 @@ enum EngineEvent: Sendable {
 enum ModelState: Equatable, Sendable {
     case notDownloaded
     case downloading(fraction: Double)   // 0...1, or -1 when unknown
+    /// Download paused by the user at `fraction`; the partial files stay on disk and the next
+    /// `prepare` continues from where it stopped (byte-range resume).
+    case paused(fraction: Double)
     case ready
     case failed(String)
 }

@@ -88,6 +88,8 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
             let m = try await ModelStore.shared.makeManager(variant)
             state.withLock { $0.manager = m }
             progress(.ready)
+        } catch is CancellationError {
+            throw CancellationError()   // paused or cancelled by the user; the session decides what to show
         } catch {
             Log.error("engine \(identifier): prepare failed: \(error.localizedDescription)")
             progress(.failed(error.localizedDescription))

@@ -43,9 +43,14 @@ terminal.
   `open --env HEARSAY_SNAPSHOT_DIR=/tmp/hs build/hearsay.app`. `HEARSAY_SNAPSHOT_INTERVAL=0.1`
   shortens the interval; `HEARSAY_SNAPSHOT_SEQ=1` keeps every frame (`name-0001.png`, …) and logs
   each window's frame to `frames.txt`, for stepping through an animation.
-- `HEARSAY_UI_SCRIPT="panel@3,captions@10,pause@20"` runs those UI actions that many seconds after
-  launch (`panel`: toggle the live transcript, `captions`: the bar's captions chevron, `pause`), so
-  states that need a click can be snapshotted unattended.
+- `HEARSAY_TRANSCRIPTS_DIR=/some/dir` makes the instance read and write its transcripts there
+  instead of `~/Documents/hearsay` (unattended runs then leave the real folder alone).
+- `HEARSAY_UI_SCRIPT="window@3,captions@10,pause@20"` runs those UI actions that many seconds after
+  launch (`window`: open the main window, `panel`: toggle it on the live view as the bar's button
+  does, `past`: select the newest saved transcript, `hideme`: toggle the "me" chip, `delete`: show
+  the Trash confirm, `dark` / `light`: force the window's appearance, `small` / `large`: 700×480 /
+  1200×800, `captions`: the bar's captions chevron, `pause`), so states that need a click can be
+  snapshotted unattended.
 
 First launch: the welcome window asks for Microphone access; macOS asks for System Audio Recording
 the first time you start listening. If a grant doesn't take effect, use Troubleshooting ▸ Relaunch.

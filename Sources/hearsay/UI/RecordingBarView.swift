@@ -20,6 +20,8 @@ struct RecordingBarView: View {
     let feed: CaptionsFeed
     let actions: RecordingBar.Actions
     let toggleCaptions: () -> Void
+    /// Switch to the pill.
+    let shrink: () -> Void
     let dragBegan: () -> Void
     let snapBack: () -> Void
 
@@ -32,7 +34,7 @@ struct RecordingBarView: View {
                 CaptionsSlot(feed: feed, bar: bar, dragBegan: dragBegan, snapBack: snapBack)
                     .transition(.opacity.combined(with: .offset(y: 10)))
             }
-            BarControls(model: model, bar: bar, actions: actions, toggleCaptions: toggleCaptions)
+            BarControls(model: model, bar: bar, actions: actions, toggleCaptions: toggleCaptions, shrink: shrink)
                 .frame(height: RecordingBar.controlsHeight)
                 .background(BarDragArea(dragBegan: dragBegan, doubleClick: snapBack))
                 .modifier(Surface(cornerRadius: RecordingBar.controlsHeight / 2))
@@ -66,8 +68,8 @@ private struct CaptionsSlot: View {
     }
 }
 
-/// Dark fill, 1 px hairline, soft shadow.
-private struct Surface: ViewModifier {
+/// Dark fill, 1 px hairline, soft shadow: the bar's shapes and the pill.
+struct Surface: ViewModifier {
     let cornerRadius: CGFloat
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -88,9 +90,10 @@ private struct BarControls: View {
     @ObservedObject var bar: RecordingBarState
     let actions: RecordingBar.Actions
     let toggleCaptions: () -> Void
+    let shrink: () -> Void
 
     private static let amber = Color(red: 1, green: 0.74, blue: 0.27)
-    private var paused: Bool { bar.phase == .paused }
+    private var paused: Bool { bar.paused }
     private var captions: Bool { bar.captions }
 
     var body: some View {
@@ -98,35 +101,25 @@ private struct BarControls: View {
             // Everything but the buttons ignores clicks, so they fall through to the drag area
             // behind: the whole bar is a handle.
             Group {
-                StatusDot(state: dotState).id(dotState)   // fresh view per state: no leftover pulse
+                StatusDot(state: bar.dotState).id(bar.dotState)   // fresh view per state: no leftover pulse
                 Waveform(audio: model.audio).opacity(paused ? 0.4 : 1)
                     .animation(.easeInOut(duration: 0.25), value: paused)
                 elapsed
             }
             .allowsHitTesting(false)
             HStack(spacing: 0) {
-                BarIconButton(symbol: paused ? "play.fill" : "pause.fill",
-                              help: paused ? "Resume (⌃⌥P)" : "Pause (⌃⌥P)", action: actions.togglePause)
-                    .disabled(!(bar.phase == .listening || paused))
-                BarIconButton(symbol: "stop.fill", help: "Stop and save the transcript (⌃⌥H)",
-                              hoverTint: Color(red: 1, green: 0.36, blue: 0.33), action: actions.stop)
+                PauseButton(bar: bar, action: actions.togglePause)
+                StopButton(action: actions.stop)
                 BarIconButton(symbol: "text.alignleft",
                               help: bar.panelVisible ? "Hide live transcript" : "Show live transcript",
                               active: bar.panelVisible, action: actions.togglePanel)
+                BarIconButton(symbol: "arrow.down.right.and.arrow.up.left", help: "Shrink to a pill", action: shrink)
                 BarIconButton(symbol: "chevron.up", help: captions ? "Hide captions" : "Show captions",
                               size: 10, width: 24, rotation: captions ? 180 : 0, action: toggleCaptions)
             }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-    }
-
-    private var dotState: StatusDot.State {
-        switch bar.phase {
-        case .paused: return .paused
-        case .listening: return .live
-        default: return .loading
-        }
     }
 
     private var elapsed: some View {
@@ -154,6 +147,26 @@ extension RecordingBarView {
 }
 
 // MARK: - Pieces
+
+/// Pause / Resume, the same on the bar and the pill.
+struct PauseButton: View {
+    @ObservedObject var bar: RecordingBarState
+    let action: () -> Void
+    var body: some View {
+        BarIconButton(symbol: bar.paused ? "play.fill" : "pause.fill",
+                      help: bar.paused ? "Resume (⌃⌥P)" : "Pause (⌃⌥P)", action: action)
+            .disabled(!bar.canPause)
+    }
+}
+
+/// Stop: red on hover.
+struct StopButton: View {
+    let action: () -> Void
+    var body: some View {
+        BarIconButton(symbol: "stop.fill", help: "Stop and save the transcript (⌃⌥H)",
+                      hoverTint: Color(red: 1, green: 0.36, blue: 0.33), action: action)
+    }
+}
 
 /// 28 pt icon button: dim until hovered, soft circular highlight, optional red-on-hover tint.
 struct BarIconButton: View {

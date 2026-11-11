@@ -27,7 +27,7 @@ extension SessionController {
             } else if case .echo(let why) = echo.checkMeFinal(text: line.text, start: line.start, end: line.end,
                                                               levelGap: levelGap(from: line.start, to: line.end)) {
                 Log.info("echo filter: dropped me-line (\(why)): \"\(line.text.prefix(60))\"")
-                model.partials[.me] = nil
+                model.discardPartial(.me)
                 return
             }
             store?.insert(line)

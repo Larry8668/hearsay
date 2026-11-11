@@ -17,25 +17,41 @@ import SwiftUI
 final class WaveformNSView: NSView {
     static let barWidth: CGFloat = 2, gap: CGFloat = 2, height: CGFloat = 24
     static let barCount = 2 * AudioLevels.barCount - 1
-    static var size: CGSize { CGSize(width: CGFloat(barCount) * (barWidth + gap) - gap, height: height) }
+    static var size: CGSize { size(frames: AudioLevels.barCount) }
+    /// Strip size for the newest `frames` level frames (the pill shows a handful, the bar all).
+    static func size(frames: Int) -> CGSize { CGSize(width: CGFloat(2 * frames - 1) * (barWidth + gap) - gap, height: height) }
 
+    /// How many of the newest frames to draw.
+    let shown: Int
     private var frames: [AudioLevels.Frame] = []
     private var sub: AnyCancellable?
 
+    init(frames: Int = AudioLevels.barCount) {
+        shown = frames
+        super.init(frame: CGRect(origin: .zero, size: Self.size(frames: frames)))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
     func bind(_ audio: AudioLevels) {
         frames = audio.history
-        sub = audio.$history.sink { [weak self] h in self?.frames = h; self?.needsDisplay = true }
+        sub = audio.$history.sink { [weak self] h in
+            guard let self = self else { return }
+            self.frames = h
+            // The other shape's window stays around, ordered out; nothing to draw there.
+            if self.window?.isVisible ?? false { self.needsDisplay = true }
+        }
     }
 
-    override var intrinsicContentSize: NSSize { WaveformNSView.size }
+    override var intrinsicContentSize: NSSize { Self.size(frames: shown) }
     override var isOpaque: Bool { false }
 
     // (Tried: rendering into our own bitmap and setting it as the layer's contents each tick.
     // Measurably MORE expensive than draw(_:): a new image upload per frame.)
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let frames = Array(self.frames.suffix(shown))
         var bars: [AudioLevels.Frame] = []
-        bars.reserveCapacity(Self.barCount)
+        bars.reserveCapacity(2 * shown)
         for (i, f) in frames.enumerated() {
             if i > 0 { let p = frames[i - 1]; bars.append(.init(me: (p.me + f.me) / 2, them: (p.them + f.them) / 2)) }
             bars.append(f)
@@ -77,11 +93,13 @@ final class WaveformNSView: NSView {
 /// level ticks never re-render the bar.
 struct Waveform: NSViewRepresentable {
     let audio: AudioLevels
+    /// Newest frames to show; all of them by default.
+    var frames = AudioLevels.barCount
     func makeNSView(context: Context) -> WaveformNSView {
-        let v = WaveformNSView(frame: CGRect(origin: .zero, size: WaveformNSView.size))
+        let v = WaveformNSView(frames: frames)
         v.bind(audio)
         return v
     }
     func updateNSView(_ view: WaveformNSView, context: Context) {}
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: WaveformNSView, context: Context) -> CGSize? { WaveformNSView.size }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: WaveformNSView, context: Context) -> CGSize? { WaveformNSView.size(frames: frames) }
 }
