@@ -116,7 +116,7 @@ struct WelcomeView: View {
         switch model.modelState {
         case .notDownloaded: return "Downloaded once (about 580 MB), stays on this Mac"
         case .downloading(let f): return f < 0 ? "Preparing…" : "Downloading \(Int(f * 100))% · stays on this Mac"
-        case .paused(let f): return f < 0 ? "Download paused" : "Download paused at \(Int(f * 100))% · resumes where it stopped"
+        case .paused(let f): return f < 0 ? "Download paused" : "Paused at \(Int(f * 100))% · resumes from here"
         case .ready: return "Ready · \(model.engineID) · stays on this Mac"
         case .failed(let e): return "Failed: \(e)"
         }
