@@ -90,11 +90,13 @@ struct TranscriptView: View {
         proxy.scrollTo("bottom", anchor: .bottom)
     }
 
-    /// The chip shows on the first line of a run: new speaker, different app, or a 20 s gap.
+    /// The chip shows on the first line of a run: new speaker (lane or diarized), different app,
+    /// or a 20 s gap.
     private func startsGroup(_ i: Int) -> Bool {
         guard i > 0 else { return true }
         let a = lines[i - 1], b = lines[i]
-        return a.speaker != b.speaker || a.sourceApp != b.sourceApp || b.start.timeIntervalSince(a.start) > Self.groupGap
+        return a.speaker != b.speaker || a.sourceApp != b.sourceApp || a.speakerID != b.speakerID
+            || b.start.timeIntervalSince(a.start) > Self.groupGap
     }
 
     /// Pauses that belong above line `i` (same rule as the Markdown: before the first line that
@@ -148,7 +150,7 @@ struct TranscriptView: View {
     private func row(_ line: TranscriptLine, chip: Bool, compact: Bool) -> some View {
         layout(compact: compact) {
             if chip {
-                Chip(text: LaneColors.chipLabel(Voice(line), names: names), color: LaneColors.adaptive(line.speaker), size: 11)
+                Chip(text: LaneColors.chipLabel(Voice(line), names: names), color: LaneColors.adaptive(Voice(line), names.roster), size: 11)
             } else if !compact {
                 // Invisible stand-in keeps the column's width and the row's text baseline.
                 Chip(text: "me", color: .clear, size: 11).hidden()
@@ -172,7 +174,7 @@ struct TranscriptView: View {
     /// hypothesis that hasn't committed yet never fills the window.
     private func partialRow(_ v: Voice, _ text: String, compact: Bool, textWidth: CGFloat) -> some View {
         layout(compact: compact) {
-            Chip(text: LaneColors.chipLabel(v, names: names), color: LaneColors.adaptive(v.speaker), size: 11)
+            Chip(text: LaneColors.chipLabel(v, names: names), color: LaneColors.adaptive(v, names.roster), size: 11)
         } time: {
             TypingDots()
         } text: {
@@ -217,7 +219,8 @@ struct VoiceFilterBar: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach(voices, id: \.self) { v in
-                VoiceChip(voice: v, label: LaneColors.chipLabel(v, names: names), customName: names.names[v.key], off: hidden.contains(v),
+                VoiceChip(voice: v, label: LaneColors.chipLabel(v, names: names), customName: names.names[v.key], roster: names.roster,
+                          off: hidden.contains(v),
                           renaming: Binding(get: { renaming == v }, set: { renaming = $0 ? v : (renaming == v ? nil : renaming) }),
                           toggle: { toggle(v) }, rename: { rename(v, $0) })
             }

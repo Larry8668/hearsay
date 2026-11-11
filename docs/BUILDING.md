@@ -54,7 +54,8 @@ terminal.
   1200×800, `captions`: the bar's captions chevron, `pause`, `pill` / `full`: the bar's shape,
   `welcome` / `about`: those windows, `warn`: a sample warning line), so states that need a click
   can be snapshotted unattended. A step can carry text after "=": `title=Design review@6`,
-  `tags=a;b@6`, `name=Priya@6` (the first voice), `search=budget@8`, `yourname=Aditya@4`;
+  `tags=a;b@6`, `name=Priya@6` (the first voice), `search=budget@8`, `yourname=Aditya@4`,
+  `diarize=microphone@4` (Settings ▸ Tell speakers apart: `off`, `microphone` or `all`);
   `edittitle`, `addtag` and `rename` open those inline editors, `more` the ⋯ menu and `export` the
   Export… panel. `HEARSAY_SNAPSHOT_ALL=1` also captures the process's other on-screen windows (a
   menu, the save panel) to `extra-<id>.png`.

@@ -43,9 +43,10 @@ final class TranscriptMetaTests: XCTestCase {
         XCTAssertEqual(Voice(speaker: .them).key, "them")
         XCTAssertEqual(zoom.key, "them:us.zoom.xos")
         for v in [Voice.me, Voice(speaker: .them), zoom] { XCTAssertEqual(Voice(key: v.key), v) }
-        // A later diarization suffix names a person within the voice; the voice still resolves.
-        XCTAssertEqual(Voice(key: "me#1"), .me)
-        XCTAssertEqual(Voice(key: "them:us.zoom.xos#2"), zoom)
+        // A diarization suffix names a person within the voice: same lane and app, plus the speaker.
+        XCTAssertEqual(Voice(key: "me#1"), Voice(speaker: .me, speakerID: "me#1"))
+        XCTAssertEqual(Voice(key: "them:us.zoom.xos#2"), Voice(speaker: .them, app: "us.zoom.xos", speakerID: "them:us.zoom.xos#2"))
+        XCTAssertEqual(Voice(key: "them:us.zoom.xos#2")?.stream, zoom.key)
         XCTAssertNil(Voice(key: "robot"))
     }
 

@@ -110,7 +110,7 @@ actor PerAppEngine: TranscriptionEngine {
             }
         }
         do {
-            let events = try await engine.start(speaker: speaker)
+            let events = try await engine.start(speaker: speaker, stream: app.isEmpty ? nil : SpeakerID.stream(.them, app: app))
             let forwarder = Task.detached(priority: .userInitiated) { for await e in events { out.yield(e) } }
             Log.info("engine per-app: stream opened for \(app.isEmpty ? "unknown app" : app) (\(streams.count + 1) open)")
             return Stream(engine: engine, forwarder: forwarder, lastChunk: .now)

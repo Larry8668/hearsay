@@ -38,6 +38,42 @@ mixed stream labelled with whichever app is playing.
 Everywhere hearsay shows the two sides, **me is blue** and **them is orange**: the chips in the
 hearsay window, the lines on the recording bar, and the two halves of its waveform.
 
+## Several people on one source: telling speakers apart
+
+In a meeting room everyone is on the microphone, and on a Zoom call several people can share the
+"them" side. With **Settings ▸ Tell speakers apart** on (*Microphone only* is the default; *All
+sources* also covers each app's audio; *Off* costs nothing), hearsay runs a small speaker model next
+to the speech model and tells voices apart as they talk:
+
+- A line ends when the speaker changes, so each line is one person. A new voice has to hold the
+  floor for a moment (about half a second) before a line is cut: a "yes" in the background or two
+  people briefly talking over each other does not break the line.
+- The chip says who: while only one voice has been heard on the microphone it just says **me**; the
+  moment a second person speaks, the first becomes **Speaker 1** and the newcomer **Speaker 2**, in
+  the order they first spoke. On a call it reads **them · Zoom · Speaker 2**. Each speaker gets its
+  own shade of the lane's colour (blues for the microphone, oranges for system audio).
+- The transcript file carries the same labels; the header lists the speakers and the JSON sidecar
+  has each line's `speakerID` and a `speakers` map (id → generated label). An id is the voice's
+  key plus the speaker's number: `me#2`, `them:us.zoom.xos#1`.
+- *Speaker 2* is only the default: rename the chip in the hearsay window (see *Speaker names*
+  below) and the name replaces it in the lines, the captions and every export. The name is
+  saved in the sidecar's `names` map under the same id.
+
+Numbers are per session: *Speaker 1* in today's meeting is whoever spoke first, not the same person
+as yesterday's *Speaker 1*. To have your own voice recognised, use **Settings ▸ Tell speakers
+apart ▸ Learn my voice…** while not listening: a small panel counts down 10 seconds while you read
+anything aloud, and from the next session on your voice is labelled **me** and everyone else
+**Speaker 1, 2…**. The clip stays on this Mac (`~/Library/Application Support/hearsay/voice/me.wav`);
+*Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
+very alike it may still mix them up.
+
+The model (NVIDIA Streaming Sortformer, 234 MB) is downloaded the first time the setting is on and
+kept with the speech models. It tells up to four voices apart per source; a fifth is merged into
+the closest one. Two very similar voices (the same pitch and accent) can land in one slot. Turning
+the setting on or off during a session restarts the affected source, so the change applies at
+once. `defaults write dev.hearsay.app diarizer lseend` (or `lseend-ami`) swaps in the LS-EEND model
+(43 MB, up to ten voices, less stable identities); `sortformer` is the default.
+
 ## Speakers or headphones: echo cancellation
 
 With the sound coming out of your Mac's speakers, your microphone hears the other side too, and
@@ -136,7 +172,8 @@ later. A session in which nobody spoke leaves no file.
 A title, tags and speaker names given in the hearsay window (below) are saved into both files: the
 Markdown's heading becomes the title, with the date on the line under it and the tags in the italic
 line, and the lines use the names; the JSON keeps the raw voices plus `title`, `tags` and a `names`
-map, so other tools can tell "me" from "Aditya":
+map (keyed by voice: `me`, `them:us.zoom.xos`, or a diarized speaker's id such as `me#2`), so
+other tools can tell "me" from "Aditya":
 
 ```markdown
 # Design review
@@ -159,7 +196,7 @@ _Tags: design, q4 · Apps heard: Zoom · Engine: parakeet-unified-640ms · Made 
 | Copy transcript | The current or last session as plain text |
 | Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now*; also *Release notes*, *Check for updates now* and *About hearsay* |
 
@@ -205,9 +242,12 @@ files (for the live session, with its next save), and the window's title and the
 **Speaker names.** Right-click a speaker chip in the header (or hover it and click the pencil) and
 type a name: "me" becomes "Aditya", "them · Zoom" becomes "Priya", on that transcript only, in the
 lines, the chips, the live captions on the bar, and every copy and export. Colours never change:
-me stays blue, them stays orange. An empty name puts the original label back. To be called by your
-name everywhere, set **Settings ▸ Your name…** once: it replaces "me" in every transcript, live
-captions and export until a transcript renames "me" itself.
+me stays blue, them stays orange. An empty name puts the original label back. With speakers told
+apart each speaker has its own chip, so *Speaker 2* can become "Anna" while *Speaker 1* stays.
+To be called by your name everywhere, set **Settings ▸ Your name…** once: it replaces "me" in
+every transcript, live captions and export until a transcript renames "me" itself. It never
+replaces a numbered speaker: on a shared microphone it applies to your enrolled voice (*Learn my
+voice…*), or to the lane while it has only one voice.
 
 **Toolbar.** *Start listening* (or *Pause* / *Resume* and *Stop* with the listening time while a
 session runs), smaller / larger text, *Copy* (plain text, one timed line each), and under ⋯:
@@ -224,8 +264,9 @@ shown (next). *Export subtitles (.srt)* is the one-click shortcut that writes th
 transcript, as before.
 
 **Lines.** Each line has its time, a chip saying who spoke (**me** in blue, **them · Zoom** in
-orange, with the app's name when known) and the text. Consecutive lines from the same side show
-the chip once. Dimmer text at the bottom, with three pulsing dots, is what's being said right now
+orange, with the app's name when known, and **Speaker 2** or **them · Zoom · Speaker 2** in its
+own shade when speakers are told apart) and the text. Consecutive lines from the same speaker
+show the chip once. Dimmer text at the bottom, with three pulsing dots, is what's being said right now
 (the last few lines of it); it firms up into a line when the sentence ends. In a narrow window the
 chip and time sit on their own line above the text. The live view scrolls along while you're at
 the bottom; scroll up to reread and it stays put, with a **New lines** button to jump back down

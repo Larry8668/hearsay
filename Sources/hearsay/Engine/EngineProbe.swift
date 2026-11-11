@@ -1,21 +1,31 @@
 import FluidAudio
 import Foundation
 
-/// `hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--no-split]`
+/// `hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--no-split]
+///  [--diarize [sortformer|lseend|lseend-ami]] [--enrol me.wav]`
 ///
 /// Runs the real engine on a 16 kHz mono WAV without the GUI and prints what the session layer
 /// would receive, plus speed and memory numbers. `--two` runs a second engine instance (speaker
 /// `them`) on another file at the same time, which is how me + them run in the app. `--no-split`
 /// turns off the mid-speech line cuts (sentence / clause / length) to compare the text.
+/// `--diarize` tells speakers apart on both streams (lines print their speaker id) with the
+/// given diarizer, and `--enrol` plays a clip of one voice into it first so that voice is "me".
 /// This is the one place allowed to `print`: its output IS the product.
 enum EngineProbe {
     static func run(arguments: [String]) -> Int32 {
         var files: [String] = [], variant: StreamingModelVariant?, realtime = false, passes = 1, split = true
+        var diarizer: DiarizerKind?, enrol: String?
         var it = arguments.makeIterator()
         while let a = it.next() {
             switch a {
             case "--realtime": realtime = true
             case "--no-split": split = false
+            case "--diarize":
+                diarizer = DiarizerKind.configured()
+                if let raw = it.next() {
+                    if let k = DiarizerKind(rawValue: raw) { diarizer = k } else { files.append(raw) }
+                }
+            case "--enrol": enrol = it.next()
             // Several sessions on the same engines: proves start-after-stop works without a reload.
             case "--passes": passes = max(1, Int(it.next() ?? "") ?? 1)
             case "--variant":
@@ -29,8 +39,13 @@ enum EngineProbe {
             }
         }
         guard !files.isEmpty else {
-            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N] [--no-split]")
+            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N] [--no-split] [--diarize [KIND]] [--enrol me.wav]")
             return 2
+        }
+        var clip: [Float]?
+        if let enrol {
+            guard case .success(let s) = WAV.read(enrol) else { print("\(enrol): need 16 kHz mono WAV"); return 2 }
+            clip = s
         }
         var audio: [[Float]] = []
         for f in files {
@@ -47,6 +62,23 @@ enum EngineProbe {
         let sem = DispatchSemaphore(value: 0)
         let code = Box()
         Task.detached {
+            if let diarizer {
+                await DiarizerRegistry.shared.configure(mode: .all, kind: diarizer, clip: clip)
+                let t0 = Date()
+                let shown = Box()
+                do {
+                    try await DiarizerRegistry.shared.prepare { state in
+                        if case .downloading(let f) = state, f >= 0, Int32(f * 100) > shown.value {
+                            shown.value = Int32(f * 100)
+                            FileHandle.standardError.write("\rdownloading diarizer \(shown.value)%".data(using: .utf8)!)
+                        }
+                    }
+                    print(String(format: "diarizer: %@ ready in %.1f s; on disk %.0f MB", diarizer.rawValue,
+                                 Date().timeIntervalSince(t0), Double(ModelStore.diskSize(diarizer)) / 1_048_576))
+                } catch {
+                    print("diarizer: \(error.localizedDescription)"); code.value = 1; sem.signal(); return
+                }
+            }
             code.value = await session(audio: audio, variant: variant ?? ParakeetEngine.configuredVariant(),
                                        realtime: realtime, passes: passes, split: split)
             sem.signal()
@@ -105,14 +137,14 @@ enum EngineProbe {
                 let tag = engines.count > 1 ? "\(speaker.rawValue): " : ""
                 for await ev in events {
                     switch ev {
-                    case .partial(let text, _, _):
+                    case .partial(let text, _, _, let who):
                         firstPartial.mark(Date().timeIntervalSince(t0))
-                        print("~ \(tag)\(text)")
+                        print("~ \(tag)\(who.map { "\($0) " } ?? "")\(text)")
                     case .final(let l):
                         finalLags.append(Date().timeIntervalSince(l.end))
                         let app = l.sourceApp.map { " (\($0))" } ?? ""
-                        print(String(format: "[%.2f–%.2f] %@%@%@", l.start.timeIntervalSince(t0),
-                                     l.end.timeIntervalSince(t0), tag, l.text, app))
+                        print(String(format: "[%.2f–%.2f] %@%@%@%@", l.start.timeIntervalSince(t0),
+                                     l.end.timeIntervalSince(t0), tag, l.speakerID.map { "\($0): " } ?? "", l.text, app))
                     case .warning(let w): print("! \(tag)\(w)")
                     }
                 }

@@ -12,6 +12,8 @@ final class CaptionsFeed: ObservableObject {
     struct Block: Equatable, Identifiable {
         var voice: Voice
         var chip: String
+        /// The lane's colour, or with speakers told apart the speaker's tint of it.
+        var color: Color
         /// Lines committed while this block has been up, oldest first, one per utterance.
         var committed: [String]
         var partial: String
@@ -171,7 +173,8 @@ final class CaptionsFeed: ObservableObject {
             let committed = lines[v] ?? []
             let partial = Self.capped(shownPartial[v] ?? "")
             guard !committed.isEmpty || !partial.isEmpty else { continue }
-            next.append(Block(voice: v, chip: LaneColors.chipLabel(v, names: names), committed: committed, partial: partial))
+            next.append(Block(voice: v, chip: LaneColors.chipLabel(v, names: names), color: LaneColors.bright(v, names.roster),
+                              committed: committed, partial: partial))
         }
         order.removeAll { lastActivity[$0] == nil }
         // Too many voices: keep me and the most recently active apps.
@@ -231,7 +234,7 @@ struct CaptionsCard: View {
             } else {
                 ForEach(feed.blocks) { b in
                     HStack(alignment: .top, spacing: 10) {
-                        Chip(text: b.chip, color: LaneColors.bright(b.speaker), size: 11)
+                        Chip(text: b.chip, color: b.color, size: 11)
                             .frame(width: chipWidth, alignment: .trailing)   // a gutter: every chip 10 pt from its text
                             .padding(.top, (CaptionMetrics.natural - 17) / 2)   // centred on line 1
                         CaptionText(committed: b.committed, partial: b.partial)

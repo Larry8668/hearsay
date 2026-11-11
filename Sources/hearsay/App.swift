@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     })
     private lazy var welcome = WelcomeWindow(model: model)
     private let updates = UpdateChecker()
+    private let enrolment = EnrolmentRecorder()
     private let hotkey = Hotkey.toggleListening
     private let pauseHotkey = Hotkey.togglePause
     private var bar: RecordingBar!
@@ -163,6 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "warn": { [weak self] in self?.session.showWarning("Microphone stopped.") },
             "pill": { [weak self] in self?.model.barMode = .pill },
             "full": { [weak self] in self?.model.barMode = .full },
+            // `diarize=off|microphone|all`: Settings ▸ Tell speakers apart.
+            "diarize": { [weak self] in
+                if let m = DiarizationMode(rawValue: DebugSnapshot.scriptArgument) { self?.session.setDiarization(m) }
+            },
         ]) { _, b in b })
         Log.info("launched (engine \(model.engineID))")
     }
@@ -217,6 +222,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refresh()
             },
             setYourName: { [weak self] in self?.askYourName() },
+            setDiarization: { [weak self] raw in
+                if let mode = DiarizationMode(rawValue: raw) { self?.session.setDiarization(mode) }
+            },
+            learnVoice: { [weak self] in self?.learnVoice() },
+            forgetVoice: { [weak self] in Enrolment.forget(); self?.refresh() },
             showWelcome: { [weak self] in self?.welcome.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
             openSettings: { SettingsLinks.open(for: $0) },
@@ -270,6 +280,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.launchAtLogin = launchAtLoginEnabled()
         s.fontSize = model.fontSize
         s.echoCancellation = EchoCancellation.current.rawValue
+        s.diarization = model.diarization.rawValue
+        s.voiceEnrolled = Enrolment.exists
         s.engine = model.engineID
         s.yourName = model.yourName
         menuBar.update(s)
@@ -299,6 +311,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshVersion() {
         menuBar?.updateVersion(current: UpdateChecker.currentVersion, status: updates.status,
                                checksEnabled: updates.enabled, homebrew: UpdateChecker.installedWithHomebrew)
+    }
+
+    /// Settings ▸ Tell speakers apart ▸ Learn my voice…: 10 s of the microphone, saved for the
+    /// diarizer to label the user "me" (see Enrolment).
+    private func learnVoice() {
+        enrolment.start(canStart: model.phase == .idle) { [weak self] result in
+            switch result {
+            case .success(let speech):
+                self?.session.showWarning(String(format: "Voice learned (%.0f s of speech). From the next session on, you are \"me\".", speech))
+            case .failure(let error):
+                self?.session.showWarning(error.localizedDescription)
+            }
+            self?.refresh()
+        }
     }
 
     /// `hiding`: the voices the main window has turned off (the menu passes none).

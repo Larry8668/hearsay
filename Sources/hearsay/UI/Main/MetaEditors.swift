@@ -173,6 +173,8 @@ struct VoiceChip: View {
     let label: String
     /// The name set for this voice on this transcript (nil: built-in label or Settings ▸ Your name).
     let customName: String?
+    /// The transcript's diarized speakers: the speaker's tint and generated label.
+    var roster = SpeakerRoster()
     let off: Bool
     @Binding var renaming: Bool
     let toggle: () -> Void
@@ -182,13 +184,13 @@ struct VoiceChip: View {
     @State private var cancelled = false
     @FocusState private var focused: Bool
 
-    private var color: Color { LaneColors.adaptive(voice.speaker) }
+    private var color: Color { LaneColors.adaptive(voice, roster) }
 
     var body: some View {
         if renaming {
             HStack(spacing: 4) {
                 Image(systemName: "pencil").font(.system(size: 8.5, weight: .bold))
-                TextField(VoiceNames.defaultChipLabel(voice), text: $draft)
+                TextField(LaneColors.chipLabel(voice, roster), text: $draft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 104)

@@ -8,7 +8,8 @@ import Foundation
 struct TranscriptMeta: Codable, Equatable, Sendable {
     var title: String?
     var tags: [String] = []
-    /// Display name per voice, keyed by `Voice.key` ("me", "them:us.zoom.xos").
+    /// Display name per voice, keyed by `Voice.key`: "me", "them:us.zoom.xos", or for one
+    /// diarized speaker its id, "me#2", "them:us.zoom.xos#1" (see `SpeakerID`).
     var names: [String: String] = [:]
 
     var isEmpty: Bool { title == nil && tags.isEmpty && names.isEmpty }
@@ -37,57 +38,87 @@ struct TranscriptMeta: Codable, Equatable, Sendable {
     mutating func setTags(_ t: [String]) { tags = TranscriptMeta.cleanTags(t) }
 
     /// Sets a voice's display name; an empty or whitespace name removes it (back to the default).
-    mutating func setName(_ name: String?, for voice: Voice) {
+    mutating func setName(_ name: String?, for voice: Voice) { setName(name, forKey: voice.key) }
+
+    mutating func setName(_ name: String?, forKey key: String) {
         let n = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        names[voice.key] = n.isEmpty ? nil : n
+        names[key] = n.isEmpty ? nil : n
     }
 }
 
 extension Voice {
-    /// A stable key for per-transcript settings: "me", "them", "them:us.zoom.xos". Shaped so a
-    /// later diarization feature can tell people apart within one voice with a "#n" suffix
-    /// ("me#1", "them:us.zoom.xos#2") without changing the format: before "#" is the voice, after
-    /// it the person. Bundle identifiers never contain "#" or ":".
-    var key: String {
-        guard speaker == .them, let app = app else { return speaker.rawValue }
-        return "them:\(app)"
-    }
+    /// A stable key for per-transcript settings: "me", "them", "them:us.zoom.xos", and for a
+    /// diarized speaker its id, which is the stream's key plus "#slot" ("me#1",
+    /// "them:us.zoom.xos#2"): before "#" is the voice, after it the person. Bundle identifiers
+    /// never contain "#" or ":".
+    var key: String { speakerID ?? SpeakerID.stream(speaker, app: app) }
 
-    /// The voice a key names; a "#n" person suffix is ignored so the voice still resolves.
+    /// The voice a key names, with its speaker when the key has a "#slot".
     init?(key: String) {
-        let body = key.split(separator: "#", maxSplits: 1).first.map(String.init) ?? key
+        let body = SpeakerID.stream(of: key)
         let parts = body.split(separator: ":", maxSplits: 1).map(String.init)
         guard let first = parts.first, let speaker = Speaker(rawValue: first) else { return nil }
-        self.init(speaker: speaker, app: parts.count > 1 ? parts[1] : nil)
+        self.init(speaker: speaker, app: parts.count > 1 ? parts[1] : nil, speakerID: key.contains("#") ? key : nil)
     }
 }
 
-/// Resolves what a voice is called. Precedence: the transcript's own name for that voice, then
-/// Settings ▸ Your name for "me", then the built-in label ("me", "them · Zoom" / "them (Zoom)").
+/// Resolves what a voice is called; the one naming system for lanes, apps and diarized speakers.
+/// Precedence: the transcript's own name for that voice (`names[Voice.key]`), then Settings ▸
+/// Your name wherever the label would be "me" (the mic lane while it is one voice, or the
+/// enrolled voice; never "Speaker 2"), then the generated label: the lane's ("me",
+/// "them · Zoom" / "them (Zoom)") with the roster's speaker appended ("Speaker 2",
+/// "them · Zoom · Speaker 2").
 /// A value, so views and the formatter get a snapshot and re-render only when it changes.
 struct VoiceNames: Equatable, Sendable {
     /// `TranscriptMeta.names`.
     var names: [String: String] = [:]
     /// Settings ▸ Your name (`storedYourName`); nil or blank means none.
     var yourName: String?
+    /// The diarized speakers ("Speaker 2"); empty when speakers are not told apart.
+    var roster = SpeakerRoster()
 
-    init(names: [String: String] = [:], yourName: String? = nil) {
+    init(names: [String: String] = [:], yourName: String? = nil, roster: SpeakerRoster = SpeakerRoster()) {
         self.names = names
         self.yourName = yourName
+        self.roster = roster
     }
 
-    init(_ meta: TranscriptMeta, yourName: String?) { self.init(names: meta.names, yourName: yourName) }
+    init(_ meta: TranscriptMeta, yourName: String?, roster: SpeakerRoster = SpeakerRoster()) {
+        self.init(names: meta.names, yourName: yourName, roster: roster)
+    }
 
-    /// The name chosen for the voice, or nil when the built-in label applies.
+    /// The name chosen for the voice, or nil when the generated label applies.
     func custom(_ v: Voice) -> String? {
         if let n = names[v.key]?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
-        if v.speaker == .me, let y = yourName?.trimmingCharacters(in: .whitespaces), !y.isEmpty { return y }
+        if isMe(v), let y = yourName?.trimmingCharacters(in: .whitespaces), !y.isEmpty { return y }
         return nil
     }
 
-    /// "Priya", "Aditya", or the chip's built-in label: "me", "them · Zoom", "them".
+    /// True when the voice's generated label is "me": the mic lane without a speaker, its only
+    /// speaker so far, or the enrolled voice.
+    func isMe(_ v: Voice) -> Bool {
+        guard v.speaker == .me else { return false }
+        guard let id = v.speakerID, let n = roster.displayName(id) else { return true }
+        return n == "me"
+    }
+
+    /// "Priya", "Aditya", or the chip's generated label: "me", "them · Zoom", "them",
+    /// "Speaker 2", "them · Zoom · Speaker 2".
     func chipLabel(_ v: Voice, appName: (String) -> String = { AppNames.name(for: $0) }) -> String {
-        custom(v) ?? VoiceNames.defaultChipLabel(v, appName: appName)
+        custom(v) ?? roster.label(v.speakerID, lane: v.speaker, base: VoiceNames.defaultChipLabel(v, appName: appName))
+    }
+
+    /// A speaker's own name without its lane ("Anna", "Speaker 2", "me"), for the Markdown
+    /// header's "Speakers:" list.
+    func speakerName(_ id: String) -> String {
+        if let v = Voice(key: id), let n = custom(v) { return n }
+        return roster.defaultName(id)
+    }
+
+    /// True when the roster is worth listing: more than one speaker, or one that was named or
+    /// enrolled (a lone, unnamed "me" is the default and says nothing).
+    var hasSpeakersToList: Bool {
+        roster.order.count > 1 || roster.order.contains { names[$0] != nil || roster.enrolled.contains($0) }
     }
 
     static func defaultChipLabel(_ v: Voice, appName: (String) -> String = { AppNames.name(for: $0) }) -> String {

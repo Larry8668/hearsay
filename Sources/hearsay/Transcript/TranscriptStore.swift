@@ -25,6 +25,9 @@ final class TranscriptStore {
     private(set) var lines: [TranscriptLine] = []
     /// Pauses in order; the last one is open (`end == nil`) while paused.
     private(set) var pauses: [PauseInterval] = []
+    /// Diarized speakers seen so far, in order, and which one is the enrolled voice (see
+    /// SpeakerRoster): where "Speaker 2" comes from. Names people give them live in `meta.names`.
+    private(set) var speakers = SpeakerRoster()
     let formatter: TranscriptFormatter
     /// Title, tags and voice names (see `TranscriptMeta`). Kept here so every write, including
     /// the final one, carries them; a change after the file exists rewrites it like a new line.
@@ -37,7 +40,7 @@ final class TranscriptStore {
     /// `formatter` with this transcript's names applied: what every render and export uses.
     var namedFormatter: TranscriptFormatter {
         var f = formatter
-        f.names = VoiceNames(meta, yourName: yourName())
+        f.names = VoiceNames(meta, yourName: yourName(), roster: speakers)
         return f
     }
     /// Fixed at creation from `startedAt`; " 2", " 3"… appended if that minute is taken.
@@ -89,6 +92,29 @@ final class TranscriptStore {
             if lines[mid].start <= start { lo = mid + 1 } else { hi = mid }
         }
         return lo
+    }
+
+    // MARK: Speakers
+
+    /// Records a diarized speaker id as soon as it is heard (partials included), so numbering
+    /// follows the order people first spoke.
+    func note(speaker id: String) {
+        guard speakers.note(id), !lines.isEmpty else { return }
+        scheduleWrite()
+    }
+
+    /// Marks a speaker as the enrolled voice: "me" instead of a number (see `SpeakerRoster`).
+    func markEnrolled(speaker id: String) {
+        guard speakers.markEnrolled(id), !lines.isEmpty else { return }
+        scheduleWrite()
+    }
+
+    /// Gives a speaker a name ("Anna") that replaces "Speaker 2" in the files; an empty name
+    /// goes back to the number. The same as renaming its chip: the name lives in `meta.names`
+    /// under the speaker id (which is the voice's key), and the transcript is rewritten.
+    func rename(speaker id: String, to name: String) {
+        speakers.note(id)
+        meta.setName(name, forKey: id)
     }
 
     // MARK: Pauses
@@ -148,12 +174,16 @@ final class TranscriptStore {
     private struct Snapshot { var dir: URL; var md: URL; var json: URL; var markdown: String; var sidecar: Data }
 
     /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses?,
-    /// title?, tags?, names? }`. `pauses` is optional so sidecars written before pause existed
-    /// still decode (same version); `title`, `tags` and `names` (see `TranscriptMeta`) likewise.
+    /// title?, tags?, names?, speakers? }`. Every field after `lines` is optional, so sidecars
+    /// written before it existed still decode (same version). `title`, `tags` and `names` are the
+    /// person's (`TranscriptMeta`); `speakers` is the diarizer's roster (`SpeakerRoster`): speaker
+    /// id → generated label ("Speaker 2", or "me" for the enrolled voice). A line's `speakerID` is
+    /// also its voice's key, so `names[id]`, when present, overrides `speakers[id]`.
     struct Sidecar: Codable {
         var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine]
         var pauses: [PauseInterval]?
         var title: String?; var tags: [String]?; var names: [String: String]?
+        var speakers: [String: String]?
     }
 
     /// ISO 8601 with milliseconds: whole seconds would lose the order of lines that start in the
@@ -190,6 +220,7 @@ final class TranscriptStore {
         let md = namedFormatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses, meta: meta)
         var side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
         side.meta = meta
+        side.speakers = speakers.isEmpty ? nil : speakers.map
         let data = (try? TranscriptStore.jsonEncoder.encode(side)) ?? Data()
         return Snapshot(dir: directory, md: markdownURL, json: jsonURL, markdown: md, sidecar: data)
     }
@@ -203,7 +234,7 @@ final class TranscriptStore {
         var side = try jsonDecoder.decode(Sidecar.self, from: Data(contentsOf: jsonURL))
         side.meta = meta
         var f = formatter
-        f.names = VoiceNames(meta, yourName: yourName)
+        f.names = VoiceNames(meta, yourName: yourName, roster: side.roster)
         let md = f.markdown(lines: side.lines, start: side.startedAt, end: side.endedAt, engine: side.engine, pauses: side.pauses ?? [], meta: meta)
         let mdURL = jsonURL.deletingPathExtension().appendingPathExtension("md")
         try Data(md.utf8).write(to: mdURL, options: .atomic)

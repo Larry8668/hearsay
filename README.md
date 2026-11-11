@@ -34,12 +34,16 @@ Neural Engine, and saves a Markdown transcript when you stop.
   each with its own label, never blended.
 - **Live captions** on a small bar at the bottom of the screen: the last two lines per speaker,
   scrolling up like subtitles. The full text is one click away.
+- **Who said what.** Several people on one microphone, or on one call, are told apart as they
+  talk: *Speaker 1*, *Speaker 2*, *them · Zoom · Speaker 2*, each in its own shade, until you
+  give them names. Teach it your voice once and you stay *me*.
 - **Your transcripts, kept.** Every call in one window: title it, tag it, name the speakers
   ("them · Zoom" → "Priya"), search across all of them, and export what you choose to show as
   Markdown, JSON, plain text or subtitles.
 - **Speakers or headphones.** With speakers, echo cancellation and a text-level echo filter keep
   the other side out of your lane.
-- **Offline, private.** The speech model is downloaded once (about 580 MB) and runs locally. The
+- **Offline, private.** The speech model (about 580 MB) and the speaker model (234 MB) are
+  downloaded once and run locally. The
   only network request hearsay ever makes is an optional daily check for a new version.
 - **Light.** About 8% of one core while listening with headphones, 1% when idle.
 

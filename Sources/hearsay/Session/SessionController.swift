@@ -83,6 +83,56 @@ final class SessionController {
         }
     }
 
+    // MARK: Speakers (diarization)
+
+    /// Settings ▸ Tell speakers apart. Persists the mode, loads (or drops) the speaker model and,
+    /// mid-session, restarts the lanes whose setting changed so the diarizer joins or leaves them
+    /// now rather than at the next start.
+    func setDiarization(_ mode: DiarizationMode) {
+        guard mode != model.diarization else { return }
+        model.diarization = mode
+        Log.info("diarization set to \(mode.rawValue)")
+        onChange()
+        Task {
+            let before = await DiarizerRegistry.shared.mode
+            await DiarizerRegistry.shared.setMode(mode)
+            if mode == .off {
+                await DiarizerRegistry.shared.unload()
+                model.diarizerState = .notDownloaded
+            } else {
+                await prepareDiarizer()
+            }
+            guard model.phase == .listening else { onChange(); return }
+            for s in Array(lanes.keys) where before.covers(s) != mode.covers(s) {
+                await stopLane(s)
+                await startLane(s)
+            }
+            onChange()
+        }
+    }
+
+    /// Downloads / loads the diarizer unless the mode is Off; progress lands in the status line.
+    func prepareDiarizer() async {
+        let report: @Sendable (ModelState) -> Void = { [weak self] state in
+            Task { @MainActor in
+                guard let self, self.model.diarizerState != state else { return }
+                self.model.diarizerState = state
+                self.onChange()
+            }
+        }
+        do { try await DiarizerRegistry.shared.prepare(progress: report) } catch {
+            showWarning("Speaker model unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    /// The enrolled voice took this diarized slot: label it "me" in the file and the live views.
+    /// (Names a person gives speakers go through `AppModel.Actions.setLiveMeta`, like any voice's.)
+    func markEnrolled(speaker id: String) {
+        store?.markEnrolled(speaker: id)
+        var r = model.speakers
+        if r.markEnrolled(id) { model.speakers = r }
+    }
+
     // MARK: Engine preparation
 
     /// Creates both engines and prepares them (model download / load). Safe to call again after a
@@ -124,6 +174,9 @@ final class SessionController {
             prepareTask = nil
             onChange()
             if startWhenReady { startWhenReady = false; model.phase = .idle; start() }
+            // After the speech models (both downloads toggle FluidAudio's offline mode), and not
+            // before the session above starts: lanes that start without it simply go undiarized.
+            if enginesReady { await prepareDiarizer() }
         }
     }
 
@@ -200,6 +253,7 @@ final class SessionController {
         model.partials = [:]
         model.hiddenVoices = []     // a fresh session shows every voice again
         model.liveMeta = TranscriptMeta()   // and starts untitled, untagged, with the default names
+        model.speakers = SpeakerRoster()
         model.pausedTotal = 0
         model.pausedAt = nil
         model.permissionDenied = []
@@ -210,6 +264,7 @@ final class SessionController {
         echo = EchoFilter()
         levelHistory.clear()
         startTask = Task {
+            await DiarizerRegistry.shared.beginSession()   // fresh speaker slots for a new transcript
             await startLanes(speakers)
             startTask = nil
             if lanes.isEmpty {
@@ -237,6 +292,7 @@ final class SessionController {
         stopTask = Task {
             for t in pending { await t?.value }
             for s in Array(lanes.keys) { await stopLane(s) }
+            await DiarizerRegistry.shared.endSession()
             store?.finish()               // closes a pause still open (stop while paused)
             model.partials = [:]
             model.pausedAt = nil

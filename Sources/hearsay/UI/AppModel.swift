@@ -32,7 +32,7 @@ final class AppModel: ObservableObject {
         didSet { VoiceNames.storedYourName = yourName }
     }
     /// What the live views and the captions call each voice right now.
-    var liveNames: VoiceNames { VoiceNames(liveMeta, yourName: yourName) }
+    var liveNames: VoiceNames { VoiceNames(liveMeta, yourName: yourName, roster: speakers) }
     @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
     }
@@ -51,6 +51,12 @@ final class AppModel: ObservableObject {
     @Published var partials: [Voice: String] = [:]
     @Published var modelState: ModelState = .notDownloaded
     @Published var engineID = ""
+    /// The speaker diarizer's download / load, when "Tell speakers apart" is on.
+    @Published var diarizerState: ModelState = .notDownloaded
+    /// Settings ▸ Tell speakers apart (persisted; SessionController applies it per lane).
+    @Published var diarization: DiarizationMode = .current { didSet { DiarizationMode.current = diarization } }
+    /// Diarized speakers of the current (or last) session, for chip labels and colours.
+    @Published var speakers = SpeakerRoster()
     /// Last engine/source warning, cleared after a while.
     @Published var warning: String?
     /// Sources that failed with `permissionDenied` on the last start.
@@ -114,6 +120,9 @@ final class AppModel: ObservableObject {
         case .failed: return "Speech model unavailable · Start listening tries again"
         default: break
         }
+        if case .downloading(let f) = diarizerState {
+            return f < 0 ? "Preparing speaker model…" : "Downloading speaker model \(Int(f * 100))%"
+        }
         switch phase {
         case .idle: return "Not listening"
         case .starting: return "Starting…"
@@ -130,10 +139,11 @@ final class AppModel: ObservableObject {
         clearPartial(for: line)
     }
 
-    /// Drops the in-progress text the line replaces: its voice, and for "them" also the entry
-    /// that had no app yet (the app is a running vote, so a partial can precede its label).
+    /// Drops the in-progress text the line replaces: every voice of its stream (a stream has one
+    /// hypothesis at a time, whichever speaker it was attributed to), and for "them" also the
+    /// entry that had no app yet (the app is a running vote, so a partial can precede its label).
     func clearPartial(for line: TranscriptLine) {
-        partials[Voice(line)] = nil
+        for v in partials.keys where v.speaker == line.speaker && v.app == line.sourceApp { partials[v] = nil }
         if line.speaker == .them { partials[Voice(speaker: .them)] = nil }
     }
 
@@ -148,5 +158,12 @@ final class AppModel: ObservableObject {
     func discardPartial(_ v: Voice) {
         partials[v] = nil
         discards[v, default: 0] += 1
+    }
+
+    /// `discardPartial` for every voice of a lane (with speakers told apart, the mic lane's
+    /// hypothesis may be filed under any of its speakers).
+    func discardPartials(_ s: Speaker) {
+        let voices = Set(partials.keys.filter { $0.speaker == s }).union(s == .me ? [Voice.me] : [])
+        for v in voices { discardPartial(v) }
     }
 }

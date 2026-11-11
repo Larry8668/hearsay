@@ -150,7 +150,7 @@ struct PastContentView: View {
     var body: some View {
         let e = doc.entry
         let hidden = state.hidden(for: e.jsonURL)
-        let names = VoiceNames(doc.meta, yourName: state.yourName)
+        let names = VoiceNames(doc.meta, yourName: state.yourName, roster: doc.speakers)
         VStack(spacing: 0) {
             ContentHeader(meta: doc.meta, defaultTitle: TranscriptFormatter().dateRange(start: e.startedAt, end: e.endedAt),
                           detail: { Text(details) }, voices: doc.lines.voices, hidden: hidden, names: names,

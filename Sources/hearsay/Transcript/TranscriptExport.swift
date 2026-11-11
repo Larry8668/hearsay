@@ -61,7 +61,7 @@ struct TranscriptExport {
     init(document doc: TranscriptLibrary.Document, hiding hidden: Set<Voice>,
          formatter: TranscriptFormatter = TranscriptFormatter(), yourName: String? = VoiceNames.storedYourName) {
         var f = formatter
-        f.names = VoiceNames(doc.entry.meta, yourName: yourName)
+        f.names = VoiceNames(doc.entry.meta, yourName: yourName, roster: doc.speakers)
         self.init(lines: doc.lines.visible(hiding: hidden), start: doc.entry.startedAt, end: doc.entry.endedAt, engine: doc.entry.engine,
                   pauses: doc.pauses, meta: doc.entry.meta,
                   baseName: doc.entry.markdownURL.deletingPathExtension().lastPathComponent, formatter: f)
@@ -98,6 +98,10 @@ struct TranscriptExport {
     private func json() -> String {
         var side = TranscriptStore.Sidecar(startedAt: start, endedAt: end, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
         side.meta = meta
+        // The generated labels of the speakers still shown (names are in `meta`).
+        let shown = Set(lines.compactMap(\.speakerID))
+        let speakers = formatter.names.roster.map.filter { shown.contains($0.key) }
+        side.speakers = speakers.isEmpty ? nil : speakers
         guard let data = try? TranscriptStore.jsonEncoder.encode(side) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }

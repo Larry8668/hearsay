@@ -49,7 +49,7 @@ actor ModelStore {
         return requiredFiles(variant).reduce(0) { $0 + allocatedSize(dir.appendingPathComponent($1)) }
     }
 
-    private nonisolated static func allocatedSize(_ url: URL) -> Int64 {
+    nonisolated static func allocatedSize(_ url: URL) -> Int64 {
         let key = URLResourceKey.totalFileAllocatedSizeKey
         var total = Int64((try? url.resourceValues(forKeys: [key]))?.totalFileAllocatedSize ?? 0)
         guard let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [key]) else { return total }
@@ -99,6 +99,8 @@ actor ModelStore {
         }
     }
     private var spare: [StreamingModelVariant: [any StreamingAsrManager]] = [:]
+    /// Diarizer downloads in flight (see Diarization/DiarizerModels.swift).
+    var diarizerLoads: [DiarizerKind: Task<DiarizerWeights, Error>] = [:]
 
     /// Makes sure the variant is on disk, downloading it once if needed. Concurrent callers share
     /// the same download and all receive its progress.

@@ -53,6 +53,8 @@ final class TranscriptLibrary: ObservableObject {
         var entry: Entry
         var lines: [TranscriptLine]
         var pauses: [PauseInterval]
+        /// The diarized speakers ("Speaker 2"), empty when speakers were not told apart.
+        var speakers = SpeakerRoster()
         var meta: TranscriptMeta { entry.meta }
     }
 
@@ -165,7 +167,7 @@ final class TranscriptLibrary: ObservableObject {
     nonisolated static func load(_ url: URL, appName: (String) -> String = { AppNames.name(for: $0) }) -> Document? {
         guard let data = try? Data(contentsOf: url), let entry = parse(data, url: url, appName: appName),
               let side = try? TranscriptStore.jsonDecoder.decode(TranscriptStore.Sidecar.self, from: data) else { return nil }
-        return Document(entry: entry, lines: side.lines, pauses: side.pauses ?? [])
+        return Document(entry: entry, lines: side.lines, pauses: side.pauses ?? [], speakers: side.roster)
     }
 
     // MARK: Deleting
