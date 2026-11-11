@@ -228,8 +228,30 @@ struct UtteranceTracker {
 
     // MARK: Speakers
 
+    /// What the diarize log reports (`SpeakerTurnLog`); the engine takes them after each step.
+    struct SpeakerEvents: Equatable {
+        /// The look-ahead named `tentative` for audio that then settled as `settled` (from `at`).
+        struct Revision: Equatable { var tentative: Int; var settled: Int; var at: Int }
+        /// A line was cut because `to` took over from `from` at `at`, having held `held` samples.
+        struct Turn: Equatable { var from: Int; var to: Int; var at: Int; var held: Int }
+        var revisions: [Revision] = []
+        var turns: [Turn] = []
+        var isEmpty: Bool { revisions.isEmpty && turns.isEmpty }
+    }
+    private var events = SpeakerEvents()
+    /// A look-ahead slot that settled differently over less than this (2 Sortformer frames) is
+    /// edge jitter at a run boundary, not a revised speaker.
+    private static let minRevision = Int(0.16 * AudioChunk.sampleRate)
+
     mutating func observe(_ frames: SpeakerFrames) {
         for r in frames.finalized where r.end > r.start {
+            // Audio the previous look-ahead gave to another slot: that slot was a guess.
+            for t in tentativeRuns where t.speaker != r.speaker {
+                let a = max(r.start, t.start), b = min(r.end, t.end)
+                guard b - a >= Self.minRevision else { continue }
+                if let last = events.revisions.last, last.tentative == t.speaker, last.settled == r.speaker, last.at <= a { continue }
+                events.revisions.append(.init(tentative: t.speaker, settled: r.speaker, at: a))
+            }
             if var last = speakerRuns.last, last.speaker == r.speaker, last.end == r.start {
                 last.end = r.end
                 speakerRuns[speakerRuns.count - 1] = last
@@ -240,10 +262,17 @@ struct UtteranceTracker {
         tentativeRuns = frames.tentative
     }
 
-    /// Slot that spoke most of `[from, to)`; nil when no slot was active there.
-    func dominantSpeaker(from: Int, to: Int) -> Int? {
+    /// Hands over (and forgets) the speaker events since the last call.
+    mutating func takeSpeakerEvents() -> SpeakerEvents {
+        defer { events = SpeakerEvents() }
+        return events
+    }
+
+    /// Slot that spoke most of `[from, to)`; nil when no slot was active there. `settledOnly`
+    /// leaves out the model's look-ahead, which is revised about half a second later.
+    func dominantSpeaker(from: Int, to: Int, settledOnly: Bool = false) -> Int? {
         var held: [Int: Int] = [:]
-        for r in speakerRuns + tentativeRuns {
+        for r in settledOnly ? speakerRuns : speakerRuns + tentativeRuns {
             let a = max(r.start, from), b = min(r.end, to)
             if b > a { held[r.speaker, default: 0] += b - a }
         }
@@ -251,12 +280,19 @@ struct UtteranceTracker {
         return held.max { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }?.key
     }
 
-    /// Who is talking right now, for partials: whoever dominated the last `speakerHold`, else
-    /// the line so far. The short window switches captions promptly without reacting to flicker.
+    /// Who is talking, for partials, from SETTLED frames only: the newest speaker on this line
+    /// once they have held the floor for `speakerHold` (the rule that cuts a line), or straight
+    /// away while they are the line's only voice. Otherwise nil, and the engine keeps the
+    /// previous partial's speaker. Never the look-ahead: a voice it guesses at is often revised
+    /// into one already heard, and a short settled stint inside someone else's line never owns
+    /// a line either; a chip shown for either names a speaker the transcript does not have.
+    /// Captions switch about half a second later than the look-ahead would; that is the price.
     var currentSpeaker: Int? {
-        let window = Int(config.speakerHold * AudioChunk.sampleRate)
-        return dominantSpeaker(from: max(lineStart, samplesFed - window), to: samplesFed)
-            ?? dominantSpeaker(from: lineStart, to: samplesFed)
+        let runs = speakerRuns.filter { $0.end > lineStart }
+        guard let last = runs.last else { return nil }
+        var held = 0, i = runs.count - 1
+        while i >= 0, runs[i].speaker == last.speaker { held += runs[i].end - max(runs[i].start, lineStart); i -= 1 }
+        return i < 0 || Double(held) / AudioChunk.sampleRate >= config.speakerHold ? last.speaker : nil
     }
 
     /// The lane sample at which the current line's speaker changed, once the newcomer has held
@@ -264,7 +300,10 @@ struct UtteranceTracker {
     /// fine; the tentative look-ahead still flickers in the first seconds of a session) and the
     /// speech model has had time to emit the previous speaker's last words. Nil while the line
     /// has one speaker, or the earlier voice was too brief to deserve a line.
-    func speakerTurn() -> Int? {
+    func speakerTurn() -> Int? { turn()?.at }
+
+    /// `speakerTurn` with who handed over to whom and how long the newcomer has held the floor.
+    private func turn() -> SpeakerEvents.Turn? {
         let runs = speakerRuns.filter { $0.end > lineStart }
         guard let last = runs.last else { return nil }
         let rate = AudioChunk.sampleRate
@@ -280,7 +319,7 @@ struct UtteranceTracker {
         var beforeHeld = 0
         for r in runs where r.speaker == before { beforeHeld += max(0, min(r.end, streakStart) - max(r.start, lineStart)) }
         guard Double(beforeHeld) / rate >= config.speakerHold else { return nil }
-        return streakStart
+        return SpeakerEvents.Turn(from: before, to: last.speaker, at: streakStart, held: held)
     }
 
     /// Who said a word first seen at `seen`: the slot that dominated the model's last chunk
@@ -422,6 +461,7 @@ struct UtteranceTracker {
         if reason.isSplit, !modelWillReset {
             if reason == .speakerChange, let c = speakerCut() {
                 cut = (c.end, c.next); cutAt = c.at
+                if let t = turn() { events.turns.append(t) }
             } else if reason != .maxLength, reason != .speakerChange, let p = splitPoint() {
                 cut = (p.end, p.next)
             } else {

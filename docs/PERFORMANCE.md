@@ -107,8 +107,27 @@ Samantha's slot, and all three merged Karen into Samantha's (two similar synthet
 voices). Sortformer's slots are also stable across the session, which is what the labels need,
 and its enrolment recognised the enrolled voice as "me" when another voice spoke first
 (LS-EEND did too on that clip). Its limits: four slots per stream, and quiet or distant speech
-can be missed (it is trained to ignore background conversations). `defaults write
-dev.hearsay.app diarizer lseend` keeps the alternative available.
+can be missed (it is trained to ignore background conversations). Settings ▸ Tell speakers
+apart ▸ Model offers LS-EEND as "More speakers, up to 10" for meetings with more than four voices.
+
+Four voices, 2026-11-12 (release build, a 51 s clip of nine turns: `say -v Samantha / Daniel /
+Karen / Moira`, 0.4 s gaps):
+
+| Measurement | Sortformer | LS-EEND (DIHARD III) | Without |
+|---|---|---|---|
+| CLI, one stream, unpaced: RTF (wall / audio) | 0.049–0.058 | 0.044 | 0.029 |
+| Peak RSS / peak footprint | 99 MB / 67 MB | 119 MB / 54 MB | 71 MB / 50 MB |
+| `--realtime`: speakers found (voices in the clip: 4) | 3 (Karen merged into Samantha) | 2 (all three female voices merged) | — |
+| Live, through the "them" tap: speakers found / speakers with lines | 4 / 4, but Karen merged into Samantha and Moira split over two slots mid-sentence | 2 / 2 | — |
+| `[diarize]` tentative revisions over the clip | 2 | 0 | — |
+
+LS-EEND's settled frames came without any look-ahead revisions on this clip, and its turn
+boundaries matched Sortformer's to within 0.1 s; what it lacks here is telling similar voices
+apart. Live, Sortformer used all four slots, but not one per voice: Karen shared Samantha's, and
+one of Moira's lines moved to a fresh slot halfway (`tentative #3 … settled as #4`, then a turn).
+With exactly four voices the slots run out and such flips happen; they are why captions now
+name only settled speakers and a speaker is numbered only with a line (see USING.md, Tell
+speakers apart).
 
 ## Audio glitches
 

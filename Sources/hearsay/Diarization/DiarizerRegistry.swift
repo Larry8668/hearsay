@@ -43,7 +43,12 @@ actor DiarizerRegistry {
 
     private(set) var mode = DiarizationMode.current
     private(set) var kind = DiarizerKind.configured()
+    /// Chosen during a session; takes over at `applyPendingKind` once it ends.
+    private(set) var pendingKind: DiarizerKind?
     private var weights: DiarizerWeights?
+    /// Stream key → its speaker-turn log for this session, and when the session started.
+    private var turnLogs: [String: SpeakerTurnLog] = [:]
+    private var sessionStart = Date()
     private var instances: [String: FluidDiarizer] = [:]
     /// Stream key → speaker id of the enrolled voice.
     private var enrolled: [String: String] = [:]
@@ -71,7 +76,33 @@ actor DiarizerRegistry {
     func prepare(progress: @escaping @Sendable (ModelState) -> Void) async throws {
         guard mode != .off else { return }
         if weights != nil { progress(.ready); return }
-        weights = try await ModelStore.shared.loadDiarizer(kind, progress: progress)
+        let k = kind
+        let w = try await ModelStore.shared.loadDiarizer(k, progress: progress)
+        // The model was switched while this one loaded: its weights must not stand in for the new one's.
+        if kind == k { weights = w }
+    }
+
+    /// Settings ▸ Tell speakers apart ▸ Model. Between sessions the old weights are dropped at
+    /// once (the caller then `prepare`s the new ones); during one the switch waits for
+    /// `endSession`, because a fresh model mid-transcript would hand out "Speaker 1" again to
+    /// someone else. Returns whether the switch happened now.
+    @discardableResult
+    func setKind(_ k: DiarizerKind, sessionRunning: Bool) -> Bool {
+        if sessionRunning, k != kind { pendingKind = k; return false }
+        pendingKind = nil
+        guard k != kind else { return true }
+        Log.info(.diarize, "diarizer: switching \(kind.rawValue) → \(k.rawValue)")
+        kind = k
+        weights = nil
+        instances = [:]
+        return true
+    }
+
+    /// A switch chosen during the session that just ended, applied now; nil when there was none.
+    func applyPendingKind() -> DiarizerKind? {
+        guard let k = pendingKind else { return nil }
+        setKind(k, sessionRunning: false)
+        return k
     }
 
     /// Releases the weights (Off with no session running): zero cost while off.
@@ -80,16 +111,26 @@ actor DiarizerRegistry {
         weights = nil
     }
 
-    func beginSession() {
+    func beginSession(at start: Date = Date()) {
         instances = [:]
+        turnLogs = [:]
+        sessionStart = start
         enrolled = [:]
         clipLoaded = false
     }
 
+    /// Logs each stream's speaker summary (see `SpeakerTurnLog`) and forgets the instances.
     func endSession() {
+        for log in turnLogs.values.sorted(by: { $0.stream < $1.stream }) {
+            if let s = log.summary() { Log.info(.diarize, s) }
+        }
+        turnLogs = [:]
         instances = [:]
         if mode == .off { weights = nil }
     }
+
+    /// The stream's speaker-turn log for this session (created with its diarizer).
+    func turnLog(for stream: String) -> SpeakerTurnLog? { turnLogs[stream] }
 
     /// The stream's diarizer for this session, created on first use; nil when speakers are not
     /// told apart on this lane or the weights are not loaded (yet).
@@ -99,6 +140,7 @@ actor DiarizerRegistry {
         do {
             let d = try ModelStore.makeDiarizer(kind, weights: weights)
             instances[stream] = d
+            if turnLogs[stream] == nil { turnLogs[stream] = SpeakerTurnLog(stream: stream, origin: sessionStart) }
             if lane == .me, let clip = enrolmentClip() {
                 if let slot = try d.enrol(clip) {
                     enrolled[stream] = SpeakerID.make(stream: stream, slot: slot)

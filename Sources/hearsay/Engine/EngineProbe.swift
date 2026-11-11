@@ -128,6 +128,8 @@ enum EngineProbe {
         let speakers: [Speaker] = [.me, .them]
         let t0 = Date()
         let firstPartial = Box2()
+        // Fresh speaker slots and turn logs per pass, like a session; `endSession` logs the summaries.
+        await DiarizerRegistry.shared.beginSession(at: t0)
         var listeners: [Task<[Double], Never>] = []
         for (i, e) in engines.enumerated() {
             let speaker = speakers[i]
@@ -175,6 +177,7 @@ enum EngineProbe {
         }
         let tFed = Date()
         for e in engines { await e.stop() }
+        await DiarizerRegistry.shared.endSession()
         var lags: [Double] = []
         for l in listeners { lags += await l.value }
         let wall = Date().timeIntervalSince(t0)

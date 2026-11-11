@@ -65,6 +65,9 @@ final class SessionController {
         }
     }
 
+    /// Tests: a transcript for `handle(_:)` to write to, without starting audio.
+    func attach(store: TranscriptStore) { self.store = store }
+
     // MARK: Source preferences
 
     static func isEnabled(_ s: Speaker) -> Bool { Prefs.store.object(forKey: "source.\(s.rawValue)") as? Bool ?? true }
@@ -107,6 +110,24 @@ final class SessionController {
                 await stopLane(s)
                 await startLane(s)
             }
+            onChange()
+        }
+    }
+
+    /// Settings ▸ Tell speakers apart ▸ Model. Persists the choice (`diarizer`, the key the
+    /// first-run model chooser writes too). Between sessions the old model is dropped and the
+    /// new one loaded (downloaded first if need be, progress in the status line). During a
+    /// session the switch waits for Stop: a new model has none of the current one's speaker
+    /// slots, so restarting the lanes would number the people already heard again.
+    func setDiarizer(_ kind: DiarizerKind) {
+        DiarizerKind.current = kind
+        onChange()
+        Task {
+            let now = await DiarizerRegistry.shared.setKind(kind, sessionRunning: model.isActive)
+            Log.info(.diarize, "diarizer set to \(kind.rawValue)\(now ? "" : " (from the next session)")")
+            guard now else { return }
+            model.diarizerState = .notDownloaded
+            await prepareDiarizer()
             onChange()
         }
     }
@@ -296,6 +317,11 @@ final class SessionController {
             for t in pending { await t?.value }
             for s in Array(lanes.keys) { await stopLane(s) }
             await DiarizerRegistry.shared.endSession()
+            // A model chosen during the session takes over now, ready for the next one.
+            if await DiarizerRegistry.shared.applyPendingKind() != nil {
+                model.diarizerState = .notDownloaded
+                Task { await prepareDiarizer() }
+            }
             store?.finish()               // closes a pause still open (stop while paused)
             model.partials = [:]
             model.pausedAt = nil

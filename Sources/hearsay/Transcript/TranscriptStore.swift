@@ -95,8 +95,8 @@ final class TranscriptStore {
 
     // MARK: Speakers
 
-    /// Records a diarized speaker id as soon as it is heard (partials included), so numbering
-    /// follows the order people first spoke.
+    /// Records a diarized speaker id when its first line arrives (never from a partial), so
+    /// numbering follows the order of first lines and `speakers` lists only voices with lines.
     func note(speaker id: String) {
         guard speakers.note(id), !lines.isEmpty else { return }
         scheduleWrite()

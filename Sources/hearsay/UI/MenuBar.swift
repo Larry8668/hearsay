@@ -23,6 +23,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         /// Settings ▸ Your name…: asks for the name used for "me". Defaulted so the delegate wires it up when it can.
         var setYourName: () -> Void = {}
         var setDiarization: (String) -> Void       // DiarizationMode raw value
+        /// Settings ▸ Tell speakers apart ▸ Model (DiarizerKind raw value). Defaulted so the delegate wires it up when it can.
+        var setDiarizer: (String) -> Void = { _ in }
         var learnVoice: () -> Void
         var forgetVoice: () -> Void
         var showWelcome: () -> Void
@@ -56,6 +58,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var fontSize: Double = 13
         var echoCancellation = "auto"
         var diarization = "microphone"
+        var diarizer = DiarizerKind.default.rawValue
         var voiceEnrolled = false
         var engine = ""
         /// Settings ▸ Your name, shown in the item's title.
@@ -88,6 +91,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let echoItem = NSMenuItem()
     private let yourNameItem = NSMenuItem()
     private let diarizationItem = NSMenuItem()
+    /// Settings ▸ Tell speakers apart ▸ Model: the two models, and a note on when a switch applies.
+    private var diarizerItems: [NSMenuItem] = []
+    private let diarizerNote = NSMenuItem()
     private let learnVoiceItem = NSMenuItem()
     private let forgetVoiceItem = NSMenuItem()
     private let engineItem = NSMenuItem()
@@ -219,6 +225,19 @@ final class MenuBar: NSObject, NSMenuDelegate {
         dnote.isEnabled = false
         diarization.addItem(dnote)
         diarization.addItem(.separator())
+        let header = NSMenuItem(title: "Model", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        diarization.addItem(header)
+        // Kept out of `representedObject` so the mode loop below does not tick them.
+        diarizerItems = DiarizerKind.offered.map { kind in
+            let mi = item(kind.menuTitle, #selector(chooseDiarizer(_:)))
+            mi.identifier = NSUserInterfaceItemIdentifier(kind.rawValue)
+            diarization.addItem(mi)
+            return mi
+        }
+        diarizerNote.isEnabled = false
+        diarization.addItem(diarizerNote)
+        diarization.addItem(.separator())
         learnVoiceItem.title = "Learn my voice…"
         bind(learnVoiceItem, #selector(learnVoice))
         diarization.addItem(learnVoiceItem)
@@ -342,6 +361,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
         for mi in diarizationItem.submenu?.items ?? [] where mi.representedObject != nil {
             mi.state = (mi.representedObject as? String) == s.diarization ? .on : .off
         }
+        for mi in diarizerItems { mi.state = mi.identifier?.rawValue == s.diarizer ? .on : .off }
+        // A switch mid-session waits for Stop (see SessionController.setDiarizer); say so up front.
+        diarizerNote.title = s.listening ? "A new choice applies from the next session" : "Switching downloads the model if needed"
         learnVoiceItem.title = s.voiceEnrolled ? "Learn my voice again…" : "Learn my voice…"
         learnVoiceItem.isEnabled = !s.listening
         forgetVoiceItem.isHidden = !s.voiceEnrolled
@@ -397,6 +419,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
     @objc private func setYourName() { actions.setYourName() }
     @objc private func chooseDiarization(_ sender: NSMenuItem) { actions.setDiarization(sender.representedObject as? String ?? "microphone") }
+    @objc private func chooseDiarizer(_ sender: NSMenuItem) { actions.setDiarizer(sender.identifier?.rawValue ?? DiarizerKind.default.rawValue) }
     @objc private func learnVoice() { actions.learnVoice() }
     @objc private func forgetVoice() { actions.forgetVoice() }
     @objc private func openMicSettings() { actions.openSettings(.me) }

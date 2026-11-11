@@ -98,6 +98,7 @@ struct VoiceNames: Equatable, Sendable {
     /// speaker so far, or the enrolled voice.
     func isMe(_ v: Voice) -> Bool {
         guard v.speaker == .me else { return false }
+        if let id = v.speakerID, roster.isProvisional(id) { return false }
         guard let id = v.speakerID, let n = roster.displayName(id) else { return true }
         return n == "me"
     }

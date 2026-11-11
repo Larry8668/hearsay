@@ -76,6 +76,11 @@ struct SpeakerRoster: Codable, Equatable, Sendable {
 
     var isEmpty: Bool { order.isEmpty }
 
+    /// A speaker the live views show (a partial) who has no line yet, on a stream that already
+    /// has speakers: not numbered, as the voice may still settle as one of them. A first voice
+    /// is not provisional; it reads like a lone voice ("me", "them · Zoom") either way.
+    func isProvisional(_ id: String) -> Bool { !order.contains(id) && !ids(in: SpeakerID.stream(of: id)).isEmpty }
+
     /// Ids seen on one stream, in order.
     func ids(in stream: String) -> [String] { order.filter { SpeakerID.stream(of: $0) == stream } }
 
@@ -92,7 +97,10 @@ struct SpeakerRoster: Codable, Equatable, Sendable {
 
     /// Chip / line label: "me", "Speaker 2", "them · Zoom", "them · Zoom · Speaker 2"; `base` is
     /// the lane's label without a speaker and `separator` how the speaker is appended to it.
+    /// A voice heard in partials but without a line yet (`isProvisional`) gets no number: on a
+    /// microphone that already has speakers "Speaker …", elsewhere the lane label.
     func label(_ id: String?, lane: Speaker, base: String, separator: String = " · ") -> String {
+        if let id, lane == .me, isProvisional(id) { return "Speaker …" }
         guard let id, let name = displayName(id) else { return base }
         if lane == .me { return name }
         return base + separator + name

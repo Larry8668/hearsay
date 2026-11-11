@@ -52,9 +52,17 @@ to the speech model and tells voices apart as they talk:
   moment a second person speaks, the first becomes **Speaker 1** and the newcomer **Speaker 2**, in
   the order they first spoke. On a call it reads **them · Zoom · Speaker 2**. Each speaker gets its
   own shade of the lane's colour (blues for the microphone, oranges for system audio).
+- Captions only name a speaker the model has settled on. The model first guesses about half a
+  second ahead and often changes its mind (a "fourth voice" that turns out to be the second); the
+  chip follows its settled answer, so it switches a moment after the voice does, and a newcomer
+  switches it only once they have held the floor long enough to start a line of their own.
+- A speaker is numbered when they get their first line, not when they first appear in the
+  captions. Until then their chip has no number (**them · Zoom**; on the microphone, once others
+  have been heard, **Speaker …**). So every speaker in the file has lines.
 - The transcript file carries the same labels; the header lists the speakers and the JSON sidecar
-  has each line's `speakerID` and a `speakers` map (id → generated label). An id is the voice's
-  key plus the speaker's number: `me#2`, `them:us.zoom.xos#1`.
+  has each line's `speakerID` and a `speakers` map (id → generated label) of the speakers who have
+  lines (plus your enrolled voice, below). An id is the voice's key plus the speaker's number:
+  `me#2`, `them:us.zoom.xos#1`.
 - *Speaker 2* is only the default: rename the chip in the hearsay window (see *Speaker names*
   below) and the name replaces it in the lines, the captions and every export. The name is
   saved in the sidecar's `names` map under the same id.
@@ -68,12 +76,42 @@ it hearing you). If it heard too little it says so and offers *Try again*. From 
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
 
-The model (NVIDIA Streaming Sortformer, 234 MB) is downloaded the first time the setting is on and
-kept with the speech models. It tells up to four voices apart per source; a fifth is merged into
-the closest one. Two very similar voices (the same pitch and accent) can land in one slot. Turning
-the setting on or off during a session restarts the affected source, so the change applies at
-once. `defaults write dev.hearsay.app diarizer lseend` (or `lseend-ami`) swaps in the LS-EEND model
-(43 MB, up to ten voices, less stable identities); `sortformer` is the default.
+Pick the speaker model under **Settings ▸ Tell speakers apart ▸ Model**:
+
+- **Steady, up to 4 speakers** (NVIDIA Streaming Sortformer, 234 MB), the default. Identities stay
+  put for the whole session and it copes with noise, but it has four slots per source: a fifth
+  voice is merged into the closest one. With exactly four people (a panel video, a four-way call)
+  a voice can also flip between two slots for a sentence.
+- **More speakers, up to 10** (LS-EEND, 43 MB): for bigger meetings. Less stable identities, and
+  in our tests it merged similar voices (three synthetic female voices became one) where
+  Sortformer kept them apart.
+
+The model is downloaded the first time it is needed (progress in the menu's status line) and kept
+with the speech models; switching drops the old one from memory. A switch made while listening
+applies from the next session, since a fresh model would hand out *Speaker 1* again to people
+already numbered. The choice is the `diarizer` setting (`sortformer`, `lseend`; `defaults write
+dev.hearsay.app diarizer lseend-ami` reaches the meeting-room LS-EEND variant the menu does not
+offer). Two very similar voices (the same pitch and accent) can land in one slot with either model.
+Turning the setting on or off during a session restarts the affected source, so that change
+applies at once.
+
+**What the log says.** Every source with speakers told apart writes a few `[diarize]` lines to the
+log (Troubleshooting ▸ Open logs), never anything that was said:
+
+```
+them:app.zen-browser.zen: new speaker #4 settled at 73.4 s
+them:app.zen-browser.zen: tentative #4 at 74.1 s settled as #2
+them:app.zen-browser.zen: turn #2→#4 at 74.3 s, held 0.9 s settled
+them:app.zen-browser.zen: summary · 4 speakers (#1 31.2 s, #2 20.4 s, #3 5.1 s, #4 1.2 s) · 12 turns · 7 tentative revisions (3 not logged)
+```
+
+*New speaker* is the first time the model settled on a voice; *tentative … settled as* is the
+model changing its mind about a voice it had guessed at; *turn* is a line cut because the speaker
+changed (how long the newcomer had spoken, settled, when it was cut). Times are seconds since the
+session started. The summary is written at Stop: seconds per speaker, turns, revisions. A source
+whose model keeps changing its mind is limited to one line of each kind per second; the summary
+counts the ones left out. A speaker with seconds in the summary but no lines in the file only
+ever spoke inside someone else's line.
 
 ## Speakers or headphones: echo cancellation
 
