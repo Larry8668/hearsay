@@ -21,6 +21,15 @@ final class AppModel: ObservableObject {
     @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
     }
+    /// The recording bar's shape: the full bar with captions, or a small pill with just the
+    /// controls that can sit anywhere (its spot is remembered separately).
+    enum BarMode: String, CaseIterable {
+        case full, pill
+        var title: String { self == .full ? "Full bar with captions" : "Small pill" }
+    }
+    @Published var barMode: BarMode = BarMode(rawValue: UserDefaults.standard.string(forKey: AppModel.barModeKey) ?? "") ?? .full {
+        didSet { UserDefaults.standard.set(barMode.rawValue, forKey: Self.barModeKey) }
+    }
     /// Committed lines of the current (or last) session, sorted by start time.
     @Published var lines: [TranscriptLine] = []
     /// In-progress text per voice (speaker, and app for "them"); cleared when that voice's final arrives.
@@ -49,7 +58,7 @@ final class AppModel: ObservableObject {
     var actions = Actions()
 
     static let fontKey = "panelFontSize", pinKey = "panelPinned"
-    static let barKey = "recordingBarShown"
+    static let barKey = "recordingBarShown", barModeKey = "recordingBarMode"
     static let fontRange: ClosedRange<Double> = 10...28
     static let fontChoices: [(Double, String)] = [(12, "Small"), (14.5, "Medium"), (17, "Large"), (21, "Extra large")]
     private static var storedFontSize: Double {
@@ -106,5 +115,14 @@ final class AppModel: ObservableObject {
 
     func clearPartials(_ speaker: Speaker) {
         for v in partials.keys where v.speaker == speaker { partials[v] = nil }
+    }
+
+    /// Per voice, how many times its in-progress text was thrown away (a "me" line that was an
+    /// echo of the speakers). The captions keep a block's last words through a gap in the
+    /// hypothesis, but not through this: the words were never said by that speaker.
+    @Published private(set) var discards: [Voice: Int] = [:]
+    func discardPartial(_ v: Voice) {
+        partials[v] = nil
+        discards[v, default: 0] += 1
     }
 }

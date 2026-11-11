@@ -16,6 +16,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var toggleSource: (Speaker) -> Void
         var toggleLoginItem: () -> Void
         var toggleRecordingBar: () -> Void
+        /// AppModel.BarMode raw value. Defaulted so the delegate wires it up when it can.
+        var setRecordingBarMode: (String) -> Void = { _ in }
         var setFontSize: (Double) -> Void
         var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
         var showWelcome: () -> Void
@@ -40,6 +42,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var paused = false
         var canPause = false
         var showBar = true
+        var barMode = AppModel.BarMode.full.rawValue
         var busy = false              // starting / stopping
         var panelVisible = false
         var hasTranscript = false
@@ -63,6 +66,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let startStopItem = NSMenuItem()
     private let pauseItem = NSMenuItem()
     private let barItem = NSMenuItem()
+    private let barModeItem = NSMenuItem()
     private let panelItem = NSMenuItem()
     private let openItem = NSMenuItem()
     private let srtItem = NSMenuItem()
@@ -157,9 +161,20 @@ final class MenuBar: NSObject, NSMenuDelegate {
         updateChecksItem.title = "Check for updates daily"
         bind(updateChecksItem, #selector(toggleUpdateChecks))
         settings.addItem(updateChecksItem)
+        // Recording bar ▸: the on/off toggle and the two shapes.
+        barModeItem.title = "Recording bar"
+        let barMenu = NSMenu()
         barItem.title = "Show recording bar"
         bind(barItem, #selector(toggleRecordingBar))
-        settings.addItem(barItem)
+        barMenu.addItem(barItem)
+        barMenu.addItem(.separator())
+        for mode in AppModel.BarMode.allCases {
+            let mi = item(mode.title, #selector(chooseBarMode(_:)))
+            mi.representedObject = mode.rawValue
+            barMenu.addItem(mi)
+        }
+        barModeItem.submenu = barMenu
+        settings.addItem(barModeItem)
         echoItem.title = "Echo cancellation"
         let echo = NSMenu()
         for choice in EchoCancellation.allCases {
@@ -219,13 +234,15 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
     private var currentIcon: IconState?
 
+    /// Reads like a switch: dimmed and monochrome when off, green when listening, orange when
+    /// paused, yellow when something needs attention (the same code as sharemask's icon).
     func setIcon(_ state: IconState) {
         guard state != currentIcon else { return }   // refreshed every second; only redraw on change
         currentIcon = state
         let symbol: String, tip: String, color: NSColor?
         switch state {
         case .idle: (symbol, color, tip) = ("waveform", nil, "hearsay: not listening")
-        case .listening: (symbol, color, tip) = ("waveform.badge.mic", .systemRed, "hearsay: listening")
+        case .listening: (symbol, color, tip) = ("waveform", .systemGreen, "hearsay: listening")
         case .paused: (symbol, color, tip) = ("pause.circle", .systemOrange, "hearsay: paused")
         case .error: (symbol, color, tip) = ("exclamationmark.triangle", .systemYellow, "hearsay: needs attention")
         }
@@ -233,14 +250,17 @@ final class MenuBar: NSObject, NSMenuDelegate {
             ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: tip)
         img = img?.withSymbolConfiguration(.init(pointSize: 14, weight: .medium))
         if let c = color {
-            // Tinted while listening so it is obvious at a glance that the mic is being transcribed.
-            img = img?.withSymbolConfiguration(.init(paletteColors: [c, .labelColor]))
+            // One flat colour (no label-colour secondary layer): the state is the colour.
+            img = img?.withSymbolConfiguration(.init(paletteColors: [c]))
             img?.isTemplate = false
         } else {
             img?.isTemplate = true   // follows the menu bar's light/dark appearance
         }
         item.button?.image = img
         item.button?.toolTip = tip
+        // Off: the template symbol at reduced alpha, so it reads as greyed out next to the
+        // other menu bar icons. The button's contentTintColor does nothing for a template image.
+        item.button?.alphaValue = state == .idle ? 0.45 : 1
     }
 
     func update(_ s: State) {
@@ -256,6 +276,9 @@ final class MenuBar: NSObject, NSMenuDelegate {
         pauseItem.isHidden = !s.listening
         pauseItem.isEnabled = s.canPause || s.paused
         barItem.state = s.showBar ? .on : .off
+        for mi in barModeItem.submenu?.items ?? [] where mi.representedObject != nil {
+            mi.state = (mi.representedObject as? String) == s.barMode ? .on : .off
+        }
         panelItem.state = s.panelVisible ? .on : .off
         copyItem.isEnabled = s.hasTranscript
         srtItem.isEnabled = s.hasTranscript
@@ -297,6 +320,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func togglePause() { actions.togglePause() }
     @objc private func togglePanel() { actions.togglePanel() }
     @objc private func toggleRecordingBar() { actions.toggleRecordingBar() }
+    @objc private func chooseBarMode(_ sender: NSMenuItem) { actions.setRecordingBarMode(sender.representedObject as? String ?? "full") }
     @objc private func openTranscript() { actions.openTranscript() }
     @objc private func openFolder() { actions.openFolder() }
     @objc private func exportSRT() { actions.exportSRT() }

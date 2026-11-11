@@ -42,6 +42,13 @@ Where it goes:
     our own bitmap and setting it as the layer's contents was worse still (a new image per tick).
   - The caption scroll is a 0.25 s animation scoped to the text view, only when a line wraps.
   - The window never changes size (captions on/off happen inside it), so no window layout.
+- **The pill costs no more than the bar.** Measured 2026-11-11 (speakers, echo cancellation on,
+  the 21 s clip, `ps cputime` over 18 s, two interleaved rounds): full bar 32% / 38%, pill
+  35% / 28%, all within the ±3% run-to-run noise on top of the ~25% voice processing. It is the
+  same dot (`PulsingDotNSView`) and the same waveform view drawing the newest 7 of the 36 level
+  frames; its SwiftUI tree observes only `RecordingBarState`. The shape not shown keeps its
+  window, ordered out; its waveform view skips `needsDisplay` while its window is not visible,
+  and `CaptionsFeed` does nothing while the pill is up (it catches up when the bar returns).
 - **Avoid on the main thread:** `SMAppService.status` is an XPC round trip (~100 ms blocked);
   `AppDelegate.refresh()` caches it for 5 s.
 

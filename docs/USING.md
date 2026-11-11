@@ -1,8 +1,8 @@
 # Using hearsay
 
-hearsay lives in the menu bar as a waveform. It turns red while listening, becomes an orange pause
-symbol while paused, and shows a warning triangle when something needs your attention (a
-permission, the speech model).
+hearsay lives in the menu bar as a waveform that reads like a switch: greyed out while it is off,
+**green** while listening, an **orange** pause symbol while paused, and a **yellow** warning
+triangle when something needs your attention (a permission, the speech model).
 
 ## Start and stop
 
@@ -54,7 +54,8 @@ that is just a copy of what "them" said at the same moment.
 While a session is listening or paused, a dark bar sits at the bottom centre of the screen, just
 above the Dock: live captions on top, the controls underneath. It stays on top of everything,
 including a full-screen Zoom or Meet, and on every Space, and clicking it never takes focus away
-from your call.
+from your call. It comes in two shapes, the full bar and a small pill (below); switch with the
+⤡ / ⤢ button on either, or under **Settings ▸ Recording bar**. hearsay remembers which you used.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -67,11 +68,12 @@ from your call.
 
 **Captions.** One block per side that has spoken in the last 10 seconds, **me** first, then
 **them** (with the app's name). Each block shows the last two lines of what that side is saying,
-like subtitles: new words appear on the bottom line and older lines slide up and fade out at the
-top. Words still being transcribed are slightly dimmer and firm up when the sentence ends. A side
-that has been quiet for 10 seconds fades away; with nobody talking the card just says
-*Listening…*. The captions only ever show the latest lines; the full text is in the live
-transcript window (≡) and the transcript file.
+like subtitles: new words appear on the bottom line and older lines slide up and out at the
+top. Words still being transcribed are slightly dimmer and firm up when the sentence ends; a
+block keeps its last words while the recogniser is making up its mind, so it never blinks
+mid-sentence. A side that has been quiet for 10 seconds fades away; with nobody talking the card
+just says *Listening…*. The captions only ever show the latest lines; the full text is in the
+live transcript window (≡) and the transcript file.
 
 **Controls.**
 
@@ -80,13 +82,27 @@ transcript window (≡) and the transcript file.
 - **Waveform**: your microphone in the upper half (blue), what the Mac plays in the lower half
   (orange). A thin line means that side is silent. It freezes and dims while paused.
 - **Time**: how long you've been listening, not counting pauses. Shows *Paused* while paused.
-- **Buttons**: pause / resume, stop (finishes and saves the transcript), and show / hide the live
-  transcript window. Hover a button for its name and shortcut.
+- **Buttons**: pause / resume, stop (finishes and saves the transcript), show / hide the live
+  transcript window, and ⤡ to shrink to the pill. Hover a button for its name and shortcut.
 - **˅ / ˄**: hides or shows the captions, leaving just the controls. hearsay remembers your choice.
   Nothing happens on hover: the bar never changes size unless you click this.
 
 Drag the bar anywhere; hearsay remembers the spot. Double-click its background to put it back at
-the bottom centre. Turn the bar off completely under **Settings ▸ Show recording bar**.
+the bottom centre. Turn the bar off completely under **Settings ▸ Recording bar ▸ Show recording
+bar**.
+
+**The pill.** For a call where the bar is in the way: a capsule the height of the controls and
+no wider than they need, with the dot, a short waveform, pause / resume, stop, and ⤢ back to the
+full bar.
+
+```
+(●  ▁▃▅▂▇▃▁   ⏸   ■   ⤢ )
+```
+
+Drag it anywhere, including right up against the screen's left or right edge; hearsay remembers
+its spot separately from the bar's, so you can keep the bar at the bottom and the pill in a
+corner. Double-click its background to put it back at the bottom centre. It has no captions and
+no clock: the live transcript window has everything.
 
 ## Pausing
 
@@ -128,7 +144,7 @@ later. A session in which nobody spoke leaves no file.
 | Copy transcript | The current or last session as plain text |
 | Export subtitles (.srt) | Writes an .srt next to the transcript (times from the start of the session) |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, show the recording bar, echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), live panel font size, which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now* |
 

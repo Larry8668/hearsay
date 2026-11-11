@@ -41,7 +41,8 @@ enum DebugSnapshot {
                 if let img = windowServerImage(w) { rep = NSBitmapImageRep(cgImage: img) }
                 if let composed = overBackdrop(rep) { rep = composed }
             }
-            let name = (w.frameAutosaveName.isEmpty ? String(describing: type(of: w)) : w.frameAutosaveName)
+            // Autosave name, else the window's identifier (the recording bar's two shapes), else its class.
+            let name = (w.frameAutosaveName.isEmpty ? (w.identifier?.rawValue ?? String(describing: type(of: w))) : w.frameAutosaveName)
                 .replacingOccurrences(of: "/", with: "-")
             // HEARSAY_SNAPSHOT_SEQ=1 keeps every frame (name-0001.png …) to step through an animation.
             let suffix = sequence ? String(format: "-%04d", count) : ""
