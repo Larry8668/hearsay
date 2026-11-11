@@ -46,19 +46,29 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     /// The recording bar's transcript button is "on" while the window shows the live transcript.
     var showingLive: Bool { isVisible && state.selection == .live }
 
-    /// Brings the window up (built on first use) and activates the app so it takes keys.
-    func show(live: Bool = false) {
+    /// Brings the window up (built on first use). `activate`: take focus, as the menu and a
+    /// relaunch do. The recording bar's button passes false: a click on it must never take focus
+    /// from the call, so the window comes to the front without the app activating (its title bar
+    /// reads as inactive); the first click inside activates it like any background window.
+    func show(live: Bool = false, activate: Bool = true) {
         library.start()
         if live || model.isActive && window == nil { state.selection = .live }
         let w = window ?? make()
         window = w
-        NSApp.activate(ignoringOtherApps: true)
-        w.makeKeyAndOrderFront(nil)
+        // A Dock icon and a real menu bar while the window is up; back to a menu-bar-only app
+        // when it closes (windowWillClose). Set before activating so the menu bar comes along.
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
+        if activate {
+            NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil)
+        } else {
+            w.orderFrontRegardless()
+        }
         onVisibilityChange?()
     }
 
     /// The bar's button: show the live transcript, or close the window if that is already up.
-    func toggleLive() { showingLive ? close() : show(live: true) }
+    func toggleLive() { showingLive ? close() : show(live: true, activate: false) }
 
     func close() { window?.close() }
 
@@ -116,6 +126,9 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             self.window?.contentViewController = nil
             self.window = nil
             self.split = nil
+            // Menu-bar-only again: the Dock icon goes, and the menu bar returns to the app the
+            // user is about to click into anyway (the welcome and About panels are fine without).
+            if NSApp.activationPolicy() != .accessory { NSApp.setActivationPolicy(.accessory) }
             self.onVisibilityChange?()
         }
     }
@@ -259,37 +272,5 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             "small": { [weak self] in self?.window?.setContentSize(NSSize(width: 700, height: 480)) },
             "large": { [weak self] in self?.window?.setContentSize(NSSize(width: 1200, height: 800)) },
         ]
-    }
-
-    // MARK: Main menu
-
-    /// An accessory app has no menu bar, but key equivalents still route through `NSApp.mainMenu`:
-    /// without an Edit menu ⌘C does nothing in the transcript's selectable text, and without a
-    /// Window menu ⌘W won't close the window.
-    static func installMainMenu() {
-        let main = NSMenu()
-        let app = NSMenu(title: "hearsay")
-        app.addItem(withTitle: "Quit hearsay", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        let edit = NSMenu(title: "Edit")
-        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
-        edit.addItem(.separator())
-        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        let win = NSMenu(title: "Window")
-        win.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        let view = NSMenu(title: "View")
-        view.addItem(withTitle: "Toggle Sidebar", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
-            .keyEquivalentModifierMask = [.command, .control]
-        for m in [app, edit, view, win] {
-            let mi = NSMenuItem(title: m.title, action: nil, keyEquivalent: "")
-            mi.submenu = m
-            main.addItem(mi)
-        }
-        NSApp.mainMenu = main
-        NSApp.windowsMenu = win
     }
 }

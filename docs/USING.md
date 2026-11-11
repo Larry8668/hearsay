@@ -83,7 +83,9 @@ hearsay window (≡) and the transcript file.
   (orange). A thin line means that side is silent. It freezes and dims while paused.
 - **Time**: how long you've been listening, not counting pauses. Shows *Paused* while paused.
 - **Buttons**: pause / resume, stop (finishes and saves the transcript), show / hide the
-  hearsay window on its live transcript, and ⤡ to shrink to the pill. Hover a button for its name and shortcut.
+  hearsay window on its live transcript, and ⤡ to shrink to the pill. Hover a button for its name
+  and shortcut. The ≡ button brings the window up without taking focus from your call (its title
+  bar reads as inactive); click into it when you want to use the keyboard there.
 - **˅ / ˄**: hides or shows the captions, leaving just the controls. hearsay remembers your choice.
   Nothing happens on hover: the bar never changes size unless you click this.
 
@@ -146,7 +148,7 @@ later. A session in which nobody spoke leaves no file.
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
 | Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), the transcript text size, which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, jump to the Microphone / System Audio privacy settings, relaunch hearsay |
-| Version line | Shows when an update is available, with *Update now* |
+| Version line | Shows when an update is available, with *Update now*; also *Release notes*, *Check for updates now* and *About hearsay* |
 
 ## The hearsay window
 
@@ -196,6 +198,16 @@ lasts until the next session starts; for a saved transcript, until the window is
 
 The window follows your light or dark appearance, remembers its size and position, and can be
 closed with ⌘W; the session carries on without it.
+
+While the window is open hearsay behaves like any Mac app: it has a Dock icon and the usual
+menus (**hearsay** ▸ About / Settings… ⌘, / Quit, **Edit**, **View** ▸ Toggle Sidebar ⌃⌘S and
+Larger / Smaller Text ⌘+ / ⌘−, **Window** ▸ Close ⌘W / Minimize ⌘M). ⌘C copies selected
+transcript text; Delete on a selected transcript in the sidebar asks to move it to the Trash. Close
+the window and hearsay is back to the menu bar only (the recording bar is never hidden by ⌘H).
+
+If a permission was refused, or a source stopped, a yellow line under the live transcript's header
+says what happened, with an **Open settings…** button for the right System Settings pane; the
+menu shows the same under its status line.
 
 ## Privacy
 

@@ -190,7 +190,7 @@ final class SessionController {
             return
         }
         let speakers = Speaker.allCases.filter(Self.isEnabled)
-        guard !speakers.isEmpty else { showWarning("Both sources are off (Sources menu)."); return }
+        guard !speakers.isEmpty else { showWarning("Both sources are off. Turn Me or Them back on under Sources."); return }
         let previous = store
         let now = Date()
         store = TranscriptStore(startedAt: now, engine: model.engineID)

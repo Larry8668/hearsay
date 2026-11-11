@@ -29,6 +29,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var copyUpdateCommand: () -> Void
         var openReleasePage: () -> Void
         var toggleUpdateChecks: () -> Void
+        var about: () -> Void = {}
         var quit: () -> Void
     }
 
@@ -310,6 +311,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         m.addItem(item("Release notes", #selector(openReleasePage)))
         m.addItem(item("Check for updates now", #selector(checkUpdates)))
+        m.addItem(.separator())
+        m.addItem(item("About hearsay", #selector(about)))
     }
 
     // MARK: Actions
@@ -338,6 +341,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func copyUpdateCommand() { actions.copyUpdateCommand() }
     @objc private func openReleasePage() { actions.openReleasePage() }
     @objc private func toggleUpdateChecks() { actions.toggleUpdateChecks() }
+    @objc private func about() { actions.about() }
     @objc private func quit() { actions.quit() }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }

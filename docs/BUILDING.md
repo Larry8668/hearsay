@@ -49,8 +49,9 @@ terminal.
   launch (`window`: open the main window, `panel`: toggle it on the live view as the bar's button
   does, `past`: select the newest saved transcript, `hideme`: toggle the "me" chip, `delete`: show
   the Trash confirm, `dark` / `light`: force the window's appearance, `small` / `large`: 700×480 /
-  1200×800, `captions`: the bar's captions chevron, `pause`), so states that need a click can be
-  snapshotted unattended.
+  1200×800, `captions`: the bar's captions chevron, `pause`, `pill` / `full`: the bar's shape,
+  `welcome` / `about`: those windows, `warn`: a sample warning line), so states that need a click
+  can be snapshotted unattended.
 
 First launch: the welcome window asks for Microphone access; macOS asks for System Audio Recording
 the first time you start listening. If a grant doesn't take effect, use Troubleshooting ▸ Relaunch.

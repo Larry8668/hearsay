@@ -97,7 +97,7 @@ final class AppModel: ObservableObject {
             let what = f < 0 ? "Preparing speech model…" : "Downloading model \(Int(f * 100))%"
             return phase == .starting ? what + " · will start when ready" : what
         case .paused(let f): return "Model download paused\(f >= 0 ? " at \(Int(f * 100))%" : "") · Start listening resumes it"
-        case .failed: return "Speech model unavailable"
+        case .failed: return "Speech model unavailable · Start listening tries again"
         default: break
         }
         switch phase {

@@ -53,13 +53,9 @@ final class UpdateChecker {
             let result: Status
             if let error = error {
                 result = .failed(error.localizedDescription)
-            } else if let data = data, (resp as? HTTPURLResponse)?.statusCode == 200,
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let tag = obj["tag_name"] as? String {
-                let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-                result = UpdateChecker.isNewer(latest, than: UpdateChecker.currentVersion) ? .available(latest) : .upToDate(latest)
             } else {
-                result = .failed("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+                result = UpdateChecker.interpret(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, body: data,
+                                                 current: UpdateChecker.currentVersion)
             }
             DispatchQueue.main.async {
                 self?.status = result
@@ -67,6 +63,18 @@ final class UpdateChecker {
                 self?.onChange?()
             }
         }.resume()
+    }
+
+    /// The outcome of one `releases/latest` reply. 404 is GitHub's answer for a repository with
+    /// no release yet (a fresh public repo, a fork): nothing newer exists, so that is "up to
+    /// date", not an error worth a line in the menu.
+    static func interpret(status: Int, body: Data?, current: String) -> Status {
+        if status == 404 { return .upToDate(current) }
+        guard status == 200 else { return .failed("HTTP \(status)") }
+        guard let body = body, let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let tag = obj["tag_name"] as? String else { return .failed("unexpected reply") }
+        let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        return isNewer(latest, than: current) ? .available(latest) : .upToDate(latest)
     }
 
     /// Numeric dotted-version comparison ("0.1.10" > "0.1.9").

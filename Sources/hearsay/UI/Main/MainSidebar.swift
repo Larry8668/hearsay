@@ -150,7 +150,8 @@ struct LiveSidebarRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Live").font(.system(size: 13, weight: .medium))
                 if state.phase != .idle {
-                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    // Anchored to the session start so the tick lands on the second (see LiveContentView).
+                    TimelineView(.periodic(from: model.startedAt ?? .now, by: 1)) { ctx in
                         Text(liveDetail(now: ctx.date)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                     }
                 } else {

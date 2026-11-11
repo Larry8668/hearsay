@@ -63,10 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var session = SessionController(model: model)
     private let library = TranscriptLibrary()
     /// The running session's file is the sidebar's "Live" entry, not a past transcript; once
-    /// stopped it is listed like any other.
+    /// stopped it is listed like any other. It stays out of the list through "Saving…" and
+    /// until the library has re-read the finalised file, or the row would briefly say
+    /// "unfinished" (the sidecar on disk has no end time until `finish` writes it).
     private lazy var mainWindow = MainWindow(model: model, library: library, currentFile: { [weak self] in
-        guard let self = self, self.model.isActive else { return nil }
-        return self.session.store?.jsonURL
+        guard let self = self, let store = self.session.store else { return nil }
+        if self.model.phase != .idle { return store.jsonURL }
+        if let e = self.library.entries.first(where: { $0.jsonURL == store.jsonURL }), e.endedAt == nil { return store.jsonURL }
+        return nil
     })
     private lazy var welcome = WelcomeWindow(model: model)
     private let updates = UpdateChecker()
@@ -86,7 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WelcomeWindow.refreshMic(self.model)
             self.refresh()
         }
-        MainWindow.installMainMenu()
+        AppMenu.install(AppMenu.Actions(
+            about: { About.show() },
+            showSettings: { [weak self] in self?.welcome.show() },
+            bumpFont: { [weak self] in self?.model.bumpFont($0) }))
         model.actions = AppModel.Actions(
             toggleListening: { [weak self] in self?.session.toggle() },
             togglePause: { [weak self] in self?.session.togglePause() },
@@ -146,6 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
+            "about": { About.show() },
+            "warn": { [weak self] in self?.session.showWarning("Microphone stopped.") },
             "pill": { [weak self] in self?.model.barMode = .pill },
             "full": { [weak self] in self?.model.barMode = .full },
         ]) { _, b in b })
@@ -214,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.updates.enabled.toggle()
                 self.refreshVersion()
             },
+            about: { About.show() },
             quit: { NSApp.terminate(nil) })
     }
 

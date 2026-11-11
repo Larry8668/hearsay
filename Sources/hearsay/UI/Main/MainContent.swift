@@ -70,9 +70,11 @@ struct LiveContentView: View {
         let hidden = model.hiddenVoices
         VStack(spacing: 0) {
             ContentHeader(title: "Live transcript", detail: {
-                if model.startedAt != nil {
-                    // Ticks once a second; only this text re-renders.
-                    TimelineView(.periodic(from: .now, by: 1)) { ctx in Text(details(now: ctx.date)) }
+                if let start = model.startedAt {
+                    // Ticks once a second; only this text re-renders. Anchored to the session's
+                    // start, not `.now`: this body re-runs on every partial, and a schedule
+                    // re-created from `.now` each time re-phased the tick (the clock stuttered).
+                    TimelineView(.periodic(from: start, by: 1)) { ctx in Text(details(now: ctx.date)) }
                 } else {
                     Text("Not listening · press \(Hotkey.toggleListening.display) to start")
                 }
@@ -80,6 +82,7 @@ struct LiveContentView: View {
                toggle: { v in if model.hiddenVoices.contains(v) { model.hiddenVoices.remove(v) } else { model.hiddenVoices.insert(v) } },
                showAll: { model.hiddenVoices = [] })
             Divider()
+            WarningRow(warning: model.warning, denied: model.permissionDenied)
             if model.lines.isEmpty && model.partials.isEmpty {
                 if firstRun && model.phase == .idle { FirstRunEmptyState(model: model) } else { LiveEmptyState(model: model) }
             } else {
@@ -186,7 +189,7 @@ struct SessionControl: View {
                 HStack(spacing: 6) {
                     Circle().fill(state.phase == .paused ? Color(red: 1, green: 0.66, blue: 0.1) : Color(red: 1, green: 0.27, blue: 0.23))
                         .frame(width: 7, height: 7)
-                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    TimelineView(.periodic(from: model.startedAt ?? .now, by: 1)) { ctx in
                         Text(RecordingBarView.clock(model.listeningTime(now: ctx.date)))
                             .font(.system(size: 12, weight: .medium).monospacedDigit())
                     }

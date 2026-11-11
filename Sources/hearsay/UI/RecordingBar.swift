@@ -169,6 +169,7 @@ final class RecordingBar: NSObject {
                                   backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.hidesOnDeactivate = false          // accessory apps are "inactive" almost always
+        p.canHide = false                    // ⌘H (Hide hearsay) must not take the bar off a call
         // .statusBar sits above full-screen apps when combined with .fullScreenAuxiliary (what
         // worked for sharemask's HUD); .floating would hide behind a full-screen Zoom.
         p.level = .statusBar
