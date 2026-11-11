@@ -22,8 +22,8 @@ final class UpdateChecker {
     private let defaultsKey = "checkForUpdates"
 
     var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
+        get { Prefs.store.object(forKey: defaultsKey) as? Bool ?? true }
+        set { Prefs.store.set(newValue, forKey: defaultsKey); newValue ? start() : stop() }
     }
 
     static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0" }

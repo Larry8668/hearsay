@@ -251,8 +251,8 @@ enum EchoCancellation: String, CaseIterable {
 
     static let key = "echoCancellation"
     static var current: EchoCancellation {
-        get { UserDefaults.standard.string(forKey: key).flatMap(EchoCancellation.init) ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: key) }
+        get { Prefs.store.string(forKey: key).flatMap(EchoCancellation.init) ?? .auto }
+        set { Prefs.store.set(newValue.rawValue, forKey: key) }
     }
     var title: String {
         switch self {

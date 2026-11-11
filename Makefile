@@ -51,7 +51,8 @@ endif
 	@codesign --verify --verbose=2 "$(APP)" && echo "signed $(APP) with '$(SIGN_IDENTITY)'"
 
 run: bundle
-	open "$(APP)"
+	# HEARSAY_DEV=1: always dev mode, even if this build was copied into /Applications by hand.
+	open --env HEARSAY_DEV=1 "$(APP)"
 
 test:
 	swift test

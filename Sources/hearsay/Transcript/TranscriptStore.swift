@@ -10,12 +10,11 @@ import AppKit
 ///
 /// Main thread only. File I/O happens on a private serial queue so it never blocks the UI.
 final class TranscriptStore {
-    /// `~/Documents/hearsay`. Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
+    /// `~/Documents/hearsay` (`hearsay-dev` in dev mode). Dev aid: `HEARSAY_TRANSCRIPTS_DIR=/some/dir` points a test instance
     /// elsewhere, so unattended runs never touch the user's own transcripts.
     static var defaultDirectory: URL {
-        if let dir = ProcessInfo.processInfo.environment["HEARSAY_TRANSCRIPTS_DIR"], !dir.isEmpty { return URL(fileURLWithPath: dir, isDirectory: true) }
-        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("hearsay", isDirectory: true)
+        DevMode.transcriptsDirectory(dev: DevMode.isDev, environment: ProcessInfo.processInfo.environment,
+                                     documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
     }
 
     let directory: URL

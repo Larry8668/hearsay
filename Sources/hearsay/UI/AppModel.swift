@@ -23,8 +23,8 @@ final class AppModel: ObservableObject {
     /// from the window and from its Copy / Export SRT. The files on disk always get every line.
     /// Reset when a session starts.
     @Published var hiddenVoices: Set<Voice> = []
-    @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
+    @Published var showRecordingBar: Bool = Prefs.store.object(forKey: AppModel.barKey) as? Bool ?? true {
+        didSet { Prefs.store.set(showRecordingBar, forKey: Self.barKey) }
     }
     /// The recording bar's shape: the full bar with captions, or a small pill with just the
     /// controls that can sit anywhere (its spot is remembered separately).
@@ -32,8 +32,8 @@ final class AppModel: ObservableObject {
         case full, pill
         var title: String { self == .full ? "Full bar with captions" : "Small pill" }
     }
-    @Published var barMode: BarMode = BarMode(rawValue: UserDefaults.standard.string(forKey: AppModel.barModeKey) ?? "") ?? .full {
-        didSet { UserDefaults.standard.set(barMode.rawValue, forKey: Self.barModeKey) }
+    @Published var barMode: BarMode = BarMode(rawValue: Prefs.store.string(forKey: AppModel.barModeKey) ?? "") ?? .full {
+        didSet { Prefs.store.set(barMode.rawValue, forKey: Self.barModeKey) }
     }
     /// Committed lines of the current (or last) session, sorted by start time.
     @Published var lines: [TranscriptLine] = []
@@ -46,7 +46,7 @@ final class AppModel: ObservableObject {
     /// Sources that failed with `permissionDenied` on the last start.
     @Published var permissionDenied: Set<Speaker> = []
     @Published var micAuthorized = false
-    @Published var fontSize: Double = AppModel.storedFontSize { didSet { UserDefaults.standard.set(fontSize, forKey: Self.fontKey) } }
+    @Published var fontSize: Double = AppModel.storedFontSize { didSet { Prefs.store.set(fontSize, forKey: Self.fontKey) } }
 
     /// What the windows can ask of the session. `copyAll` / `exportSRT` take the voices the view
     /// is hiding, so the clipboard and the .srt match what is on screen.
@@ -71,7 +71,7 @@ final class AppModel: ObservableObject {
     static let fontRange: ClosedRange<Double> = 10...28
     static let fontChoices: [(Double, String)] = [(12, "Small"), (14.5, "Medium"), (17, "Large"), (21, "Extra large")]
     private static var storedFontSize: Double {
-        let v = UserDefaults.standard.double(forKey: fontKey)
+        let v = Prefs.store.double(forKey: fontKey)
         return v == 0 ? 14.5 : min(max(v, fontRange.lowerBound), fontRange.upperBound)
     }
 

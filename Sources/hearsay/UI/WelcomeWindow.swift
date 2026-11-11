@@ -7,7 +7,7 @@ import SwiftUI
 /// the download bar moves and the mic row flips to "Allowed" live.
 final class WelcomeWindow: NSObject, NSWindowDelegate {
     static let shownKey = "welcomeShown"
-    static var shouldShowAutomatically: Bool { !UserDefaults.standard.bool(forKey: shownKey) }
+    static var shouldShowAutomatically: Bool { !Prefs.store.bool(forKey: shownKey) }
 
     private let model: AppModel
     private var window: NSWindow?
@@ -17,7 +17,7 @@ final class WelcomeWindow: NSObject, NSWindowDelegate {
     var isVisible: Bool { window?.isVisible ?? false }
 
     func show() {
-        UserDefaults.standard.set(true, forKey: Self.shownKey)
+        Prefs.store.set(true, forKey: Self.shownKey)
         WelcomeWindow.refreshMic(model)
         if let w = window { NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentViewController: NSHostingController(rootView: WelcomeView(model: model)))

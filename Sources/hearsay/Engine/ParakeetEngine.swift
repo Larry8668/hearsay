@@ -37,7 +37,7 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
     static let defaultVariant: StreamingModelVariant = .parakeetUnified640ms
 
     /// The variant from `UserDefaults["engineVariant"]`, falling back to `defaultVariant`.
-    static func configuredVariant(_ defaults: UserDefaults = .standard) -> StreamingModelVariant {
+    static func configuredVariant(_ defaults: UserDefaults = Prefs.store) -> StreamingModelVariant {
         guard let raw = defaults.string(forKey: "engineVariant") else { return defaultVariant }
         guard let v = StreamingModelVariant(rawValue: raw), v != .parakeetUnifiedOffline15s else {
             Log.warn("engine: unknown or non-streaming engineVariant '\(raw)', using \(defaultVariant.rawValue)")

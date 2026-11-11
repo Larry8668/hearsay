@@ -53,11 +53,11 @@ final class SessionController {
     init(model: AppModel) {
         self.model = model
         // Dev aid (like HEARSAY_AUTOSTART): with HEARSAY_AUTOMATION=1, end-to-end tests drive the
-        // session by posting the distributed notification "dev.hearsay.control" with object
+        // session by posting the distributed notification "dev.hearsay.control" (".dev" suffix in dev mode, so only the dev instance obeys) with object
         // "toggle" (⌃⌥H) or "pause" (⌃⌥P); synthesized key events don't reach Carbon hotkeys.
         guard ProcessInfo.processInfo.environment["HEARSAY_AUTOMATION"] == "1" else { return }
         DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("dev.hearsay.control"), object: nil, queue: .main
+            forName: Notification.Name(DevMode.controlNotificationName(dev: DevMode.isDev)), object: nil, queue: .main
         ) { [weak self] note in
             let what = note.object as? String
             Log.info("automation: \(what ?? "?")")
@@ -67,12 +67,12 @@ final class SessionController {
 
     // MARK: Source preferences
 
-    static func isEnabled(_ s: Speaker) -> Bool { UserDefaults.standard.object(forKey: "source.\(s.rawValue)") as? Bool ?? true }
+    static func isEnabled(_ s: Speaker) -> Bool { Prefs.store.object(forKey: "source.\(s.rawValue)") as? Bool ?? true }
 
     /// Persists the choice and, mid-session, starts or stops just that speaker so the transcript
     /// file carries on.
     func setEnabled(_ s: Speaker, _ on: Bool) {
-        UserDefaults.standard.set(on, forKey: "source.\(s.rawValue)")
+        Prefs.store.set(on, forKey: "source.\(s.rawValue)")
         Log.info("source \(s.rawValue) \(on ? "enabled" : "disabled")")
         // While paused only the preference changes; resume() starts whatever is enabled then.
         guard model.phase == .listening else { onChange(); return }

@@ -85,7 +85,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         self.actions = actions
         self.hotkey = hotkey
         self.pauseHotkey = pauseHotkey
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item = NSStatusBar.system.statusItem(withLength: DevMode.isDev ? NSStatusItem.variableLength : NSStatusItem.squareLength)
         super.init()
         build()
         setIcon(.idle)
@@ -101,6 +101,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
+        if DevMode.isDev {
+            let dev = NSMenuItem(title: "hearsay dev build · \(DevMode.versionString)", action: nil, keyEquivalent: "")
+            dev.isEnabled = false
+            menu.addItem(dev)
+        }
         statusLine.isEnabled = false
         warningLine.isEnabled = false
         warningLine.isHidden = true
@@ -257,6 +262,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         item.button?.image = img
         item.button?.toolTip = tip
+        if DevMode.isDev {
+            item.button?.imagePosition = .imageLeft
+            item.button?.attributedTitle = NSAttributedString(string: "dev", attributes: [
+                .font: NSFont.systemFont(ofSize: 8, weight: .bold), .baselineOffset: 5])
+        }
         // Off: the template symbol at reduced alpha, so it reads as greyed out next to the
         // other menu bar icons. The button's contentTintColor does nothing for a template image.
         item.button?.alphaValue = state == .idle ? 0.45 : 1

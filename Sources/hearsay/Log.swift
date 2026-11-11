@@ -21,7 +21,7 @@ enum Log {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"; return f
     }()
     static let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/hearsay", isDirectory: true)
-    static let fileURL = directory.appendingPathComponent("hearsay.log")
+    static let fileURL = directory.appendingPathComponent(DevMode.logFileName)
     private static let maxBytes = 5 * 1024 * 1024
     private static var handle: FileHandle?
 
@@ -64,14 +64,14 @@ enum Log {
     /// dumps copied there by hand, …) so the folder can never grow unbounded.
     private static func pruneStrays() {
         guard let items = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
-        for url in items where !["hearsay.log", "hearsay.log.1"].contains(url.lastPathComponent) {
+        for url in items where !["hearsay.log", "hearsay.log.1", "hearsay-dev.log", "hearsay-dev.log.1"].contains(url.lastPathComponent) {
             try? FileManager.default.removeItem(at: url)
         }
     }
 
     private static func rotate() {
         handle?.closeFile(); handle = nil
-        let old = directory.appendingPathComponent("hearsay.log.1")
+        let old = directory.appendingPathComponent(DevMode.logFileName + ".1")
         try? FileManager.default.removeItem(at: old)
         try? FileManager.default.moveItem(at: fileURL, to: old)
         openFile()

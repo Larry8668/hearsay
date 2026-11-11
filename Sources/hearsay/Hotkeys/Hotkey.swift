@@ -6,9 +6,9 @@ import AppKit
 /// Hotkeys, trimmed to the two shortcuts hearsay has.
 final class Hotkey {
     /// ⌃⌥H — Control-Option is rarely taken by call apps, and H for "hear".
-    static let toggleListening = Hotkey(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey), display: "⌃⌥H")
-    /// ⌃⌥P — pause / resume, same modifier family.
-    static let togglePause = Hotkey(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(controlKey | optionKey), display: "⌃⌥P")
+    static let toggleListening = Hotkey(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey | (DevMode.isDev ? shiftKey : 0)), display: DevMode.isDev ? "⌃⌥⇧H" : "⌃⌥H")
+    /// ⌃⌥P — pause / resume, same modifier family. Dev mode adds ⇧ to both so it can run beside the installed app.
+    static let togglePause = Hotkey(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(controlKey | optionKey | (DevMode.isDev ? shiftKey : 0)), display: DevMode.isDev ? "⌃⌥⇧P" : "⌃⌥P")
 
     let keyCode: UInt32
     let modifiers: UInt32
