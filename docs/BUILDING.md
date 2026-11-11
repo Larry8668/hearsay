@@ -27,7 +27,17 @@ terminal.
 
 ## Logs
 
-- File: `~/Library/Logs/hearsay/hearsay.log` (Troubleshooting ▸ Open logs)
+- File: `~/Library/Logs/hearsay/hearsay.log` (`hearsay-dev.log` for a dev build; Troubleshooting ▸ Open logs).
+  Lines read `time [LEVEL] [category] message`; categories: mic, tap, engine, session, ui, update,
+  model, diarize, app (also the os_log category). `Log.info(.mic, "…")`; a call without a category is `app`.
+  Each session is bracketed by `===== session start … =====` / `===== session end … =====` lines.
+- Rotation: the live file plus 3 rolled copies (`.1` newest … `.3` oldest), rolled at 5 MB (~20 MB cap per
+  flavour). At launch everything else in the folder is deleted, and so are rolled files older than 30 days.
+- Spoken text is not logged (only word counts) unless Troubleshooting ▸ "Verbose logging (includes transcript
+  text)" is on (`verboseLogging` in `Prefs.store`, default off).
+- Troubleshooting ▸ "Export diagnostics…" saves `hearsay-diagnostics-<date>.zip` with the log files and a
+  `report.txt` (versions, permissions, settings, audio devices, model folder, transcript count; no
+  transcript text). For scripts: `HEARSAY_UI_SCRIPT=diagnostics@5 HEARSAY_DIAGNOSTICS_OUT=/tmp/d.zip`.
 - Unified log: `/usr/bin/log show --last 5m --info --predicate 'subsystem == "dev.hearsay.app"'`
   (use the full path: `log` is also a zsh builtin)
 - `HEARSAY_VERBOSE=1` also mirrors the log to stderr.

@@ -40,7 +40,7 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
     static func configuredVariant(_ defaults: UserDefaults = Prefs.store) -> StreamingModelVariant {
         guard let raw = defaults.string(forKey: "engineVariant") else { return defaultVariant }
         guard let v = StreamingModelVariant(rawValue: raw), v != .parakeetUnifiedOffline15s else {
-            Log.warn("engine: unknown or non-streaming engineVariant '\(raw)', using \(defaultVariant.rawValue)")
+            Log.warn(.engine, "engine: unknown or non-streaming engineVariant '\(raw)', using \(defaultVariant.rawValue)")
             return defaultVariant
         }
         return v
@@ -91,7 +91,7 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
         } catch is CancellationError {
             throw CancellationError()   // paused or cancelled by the user; the session decides what to show
         } catch {
-            Log.error("engine \(identifier): prepare failed: \(error.localizedDescription)")
+            Log.error(.engine, "engine \(identifier): prepare failed: \(error.localizedDescription)")
             progress(.failed(error.localizedDescription))
             throw error
         }
@@ -107,7 +107,7 @@ final class ParakeetEngine: TranscriptionEngine, @unchecked Sendable {
                       partialInterval: partialInterval, backlog: backlog, out: out)
         let worker = Task.detached(priority: .userInitiated) { await job.run(inbox) }
         state.withLock { $0.inbox = input; $0.worker = worker }
-        Log.info("engine \(identifier): started for \(speaker.rawValue)")
+        Log.info(.engine, "engine \(identifier): started for \(speaker.rawValue)")
         return events
     }
 
@@ -154,7 +154,7 @@ private struct Job: Sendable {
             if queuedSec > 8, !behind {
                 behind = true
                 out.yield(.warning("Transcription is running \(Int(queuedSec)) s behind the audio."))
-                Log.warn("engine \(engine): backlog \(String(format: "%.1f", queuedSec)) s")
+                Log.warn(.engine, "engine \(engine): backlog \(String(format: "%.1f", queuedSec)) s")
             } else if queuedSec < 2 { behind = false }
 
             tracker.ingest(chunk)
@@ -164,7 +164,7 @@ private struct Job: Sendable {
             } catch {
                 errors += 1
                 if errors == 1 || errors % 100 == 0 {
-                    Log.error("engine \(engine): inference error #\(errors): \(error.localizedDescription)")
+                    Log.error(.engine, "engine \(engine): inference error #\(errors): \(error.localizedDescription)")
                     out.yield(.warning(EngineError.inference(error.localizedDescription).localizedDescription))
                 }
                 continue
@@ -205,12 +205,12 @@ private struct Job: Sendable {
                 out.yield(.final(line))
             }
         } catch {
-            Log.error("engine \(engine): flush failed: \(error.localizedDescription)")
+            Log.error(.engine, "engine \(engine): flush failed: \(error.localizedDescription)")
         }
         try? await manager.reset()
         out.finish()
         let revised = tracker.realignments > 0 ? ", \(tracker.realignments) committed-text revisions realigned" : ""
-        Log.info("engine \(engine): stopped (\(speaker.rawValue))\(revised)")
+        Log.info(.engine, "engine \(engine): stopped (\(speaker.rawValue))\(revised)")
     }
 
     /// Feeds a little silence into a fresh (or just reset) model. Every variant dropped the first

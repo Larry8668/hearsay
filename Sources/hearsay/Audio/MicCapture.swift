@@ -70,7 +70,7 @@ final class MicCapture: AudioSource {
             continuation = nil
             c?.onTermination = nil   // finish() would call it synchronously, re-entering this queue
             c?.finish()
-            Log.info("mic: stopped")
+            Log.info(.mic, "mic: stopped")
         }
     }
 
@@ -90,7 +90,7 @@ final class MicCapture: AudioSource {
         // Enabling it reconfigures the output device (other apps' audio stops for ~2 × 0.5 s,
         // see docs/PERFORMANCE.md "Audio glitches"); unavoidable, so it happens only at Start.
         if reused != nil {
-            Log.info("mic: reusing the parked voice-processing engine")
+            Log.info(.mic, "mic: reusing the parked voice-processing engine")
         } else if useVPIO {
             do {
                 try input.setVoiceProcessingEnabled(true)
@@ -100,10 +100,10 @@ final class MicCapture: AudioSource {
                 input.voiceProcessingOtherAudioDuckingConfiguration =
                     AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
             } catch {
-                Log.warn("mic: voice processing unavailable (\(error.localizedDescription)); capturing raw input without echo cancellation")
+                Log.warn(.mic, "mic: voice processing unavailable (\(error.localizedDescription)); capturing raw input without echo cancellation")
             }
         } else {
-            Log.info("mic: voice processing off (\(EchoCancellation.current.rawValue); output \(CA.name(CA.defaultOutputDevice) ?? "?"))")
+            Log.info(.mic, "mic: voice processing off (\(EchoCancellation.current.rawValue); output \(CA.name(CA.defaultOutputDevice) ?? "?"))")
         }
 
         // With voice processing on, a MacBook Air reports 5 or 7 channels at 48 kHz (it changes
@@ -129,7 +129,7 @@ final class MicCapture: AudioSource {
             guard let self else { return }
             self.queue.async { self.scheduleConfigurationChange() }
         }
-        Log.info("mic: started on \"\(displayName)\" \(Int(format.sampleRate)) Hz × \(format.channelCount) ch, voice processing \(input.isVoiceProcessingEnabled ? "on" : "off")")
+        Log.info(.mic, "mic: started on \"\(displayName)\" \(Int(format.sampleRate)) Hz × \(format.channelCount) ch, voice processing \(input.isVoiceProcessingEnabled ? "on" : "off")")
         watchOutputDevice()
     }
 
@@ -144,7 +144,7 @@ final class MicCapture: AudioSource {
                 guard self.continuation != nil, self.engine != nil else { return }
                 let want = EchoCancellation.shouldEnable()
                 guard want != self.vpioActive else { return }
-                Log.info("mic: output changed; echo cancellation \(want ? "on" : "off"), rebuilding engine")
+                Log.info(.mic, "mic: output changed; echo cancellation \(want ? "on" : "off"), rebuilding engine")
                 self.tearDownEngine()
                 do { try self.buildEngine() } catch { self.scheduleRetry() }
             }
@@ -201,20 +201,20 @@ final class MicCapture: AudioSource {
             installTap(on: engine.inputNode)
             do {
                 try engine.start()
-                Log.info("mic: engine restarted after configuration change")
+                Log.info(.mic, "mic: engine restarted after configuration change")
                 return
             } catch {
-                Log.warn("mic: restart failed (\(error.localizedDescription)); rebuilding")
+                Log.warn(.mic, "mic: restart failed (\(error.localizedDescription)); rebuilding")
             }
         }
-        Log.info("mic: input changed to \"\(CA.name(newDevice) ?? "none")\"; rebuilding engine")
+        Log.info(.mic, "mic: input changed to \"\(CA.name(newDevice) ?? "none")\"; rebuilding engine")
         tearDownEngine()
         do {
             try buildEngine()
         } catch {
             // Device vanished with nothing to replace it: retry instead of ending the stream, so
             // plugging a mic back in resumes the transcript.
-            Log.warn("mic: rebuild failed (\(error.localizedDescription)); retrying every 1 s")
+            Log.warn(.mic, "mic: rebuild failed (\(error.localizedDescription)); retrying every 1 s")
             scheduleRetry()
         }
     }
@@ -233,7 +233,7 @@ final class MicCapture: AudioSource {
                 for c in assembler.append(tail, startTime: nil) { continuation.yield(c) }
             }
             resampler = Resampler16k(inputFormat: buffer.format)
-            if resampler == nil { Log.warn("mic: unsupported input format \(buffer.format)"); return }
+            if resampler == nil { Log.warn(.mic, "mic: unsupported input format \(buffer.format)"); return }
         }
         guard let resampler else { return }
         let samples = resampler.convert(buffer)

@@ -31,7 +31,7 @@ extension SessionController {
         do {
             events = try await engine.start(speaker: s)
         } catch {
-            Log.error("engine start (\(s.rawValue)) failed: \(error)")
+            Log.error(.engine, "engine start (\(s.rawValue)) failed: \(error)")
             showWarning(error.localizedDescription)
             lanes[s] = nil
             return
@@ -45,7 +45,7 @@ extension SessionController {
             chunks = try await Task.detached(priority: .userInitiated) { try box.source.start() }.value
         } catch {
             if case AudioSourceError.permissionDenied = error { model.permissionDenied.insert(s) }
-            Log.error("source \(s.rawValue) (\(source.displayName)) failed to start: \(error)")
+            Log.error(.session, "source \(s.rawValue) (\(source.displayName)) failed to start: \(error)")
             showWarning(error.localizedDescription)
             await engine.stop()
             lanes[s] = nil
@@ -55,7 +55,7 @@ extension SessionController {
         // stopped the engine; just release the device.
         guard lanes[s] === lane, !lane.stopping else { source.stop(); return }
         model.permissionDenied.remove(s)
-        Log.info("lane \(s.rawValue): \(source.displayName) → \(engine.identifier)")
+        Log.info(.session, "lane \(s.rawValue): \(source.displayName) → \(engine.identifier)")
         let meter = model.audio.meter, history = levelHistory, gate = lane.gate
         if model.phase == .paused {
             await engine.stop()   // started while pausing (a source toggled on): resume() opens it
@@ -85,7 +85,7 @@ extension SessionController {
         await lane.events?.value
         lane.events = nil
         model.clearPartials(s)
-        Log.info("lane \(s.rawValue): paused (source keeps running)")
+        Log.info(.session, "lane \(s.rawValue): paused (source keeps running)")
     }
 
     /// Resumes one lane: a fresh engine session, then chunks flow again.
@@ -94,13 +94,13 @@ extension SessionController {
         do {
             lane.events = listen(try await engine.start(speaker: s))
         } catch {
-            Log.error("engine restart (\(s.rawValue)) failed: \(error)")
+            Log.error(.engine, "engine restart (\(s.rawValue)) failed: \(error)")
             showWarning(error.localizedDescription)
             await stopLane(s)
             return
         }
         lane.gate.withLock { $0 = true }
-        Log.info("lane \(s.rawValue): resumed")
+        Log.info(.session, "lane \(s.rawValue): resumed")
     }
 
     func stopLane(_ s: Speaker) async {
@@ -112,13 +112,13 @@ extension SessionController {
         await lane.events?.value          // …and every final has been stored
         lanes[s] = nil
         model.clearPartials(s)
-        Log.info("lane \(s.rawValue): stopped")
+        Log.info(.session, "lane \(s.rawValue): stopped")
     }
 
     /// A source's stream ended on its own (device unplugged, tap destroyed).
     private func sourceEnded(_ s: Speaker, lane: Lane) {
         guard !lane.stopping, lanes[s] === lane else { return }
-        Log.warn("source \(s.rawValue) ended unexpectedly")
+        Log.warn(.session, "source \(s.rawValue) ended unexpectedly")
         showWarning(s == .me ? "Microphone stopped." : "System audio stopped.")
         Task { await stopLane(s); if lanes.isEmpty { stop() }; onChange() }
     }

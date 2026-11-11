@@ -115,11 +115,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session.onChange = { [weak self] in self?.refresh() }
         mainWindow.onVisibilityChange = { [weak self] in self?.refresh() }
         hotkey.register { [weak self] in
-            Log.info("hotkey \(Hotkey.toggleListening.display)")
+            Log.info(.ui, "hotkey \(Hotkey.toggleListening.display)")
             self?.session.toggle()
         }
         pauseHotkey.register { [weak self] in
-            Log.info("hotkey \(Hotkey.togglePause.display)")
+            Log.info(.ui, "hotkey \(Hotkey.togglePause.display)")
             self?.session.togglePause()
         }
         updates.onChange = { [weak self] in self?.refreshVersion() }
@@ -147,6 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "pause": { [weak self] in self?.session.togglePause() },
             "captions": { [weak self] in self?.bar.toggleCaptions() },
             "pauseDownload": { [weak self] in self?.session.pauseDownload() },
+            // HEARSAY_DIAGNOSTICS_OUT=/path.zip: Export diagnostics without the save panel.
+            "diagnostics": {
+                let out = ProcessInfo.processInfo.environment["HEARSAY_DIAGNOSTICS_OUT"] ?? NSTemporaryDirectory() + "hearsay-diagnostics.zip"
+                do { try Diagnostics.export(to: URL(fileURLWithPath: out)) } catch { Log.error(.app, "diagnostics export failed: \(error)") }
+            },
+            "verbose": { Log.verboseText.toggle() },
             "resumeDownload": { [weak self] in self?.session.resumeDownload() },
             "cancelDownload": { [weak self] in self?.session.cancelDownload() },
             "welcome": { [weak self] in self?.welcome.show() },
@@ -167,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !quitting else { return .terminateLater }
         guard model.phase != .idle else { return .terminateNow }
         quitting = true
-        Log.info("quit: stopping session first")
+        Log.info(.session, "quit: stopping session first")
         session.stopForQuit(timeout: 4) { NSApp.reply(toApplicationShouldTerminate: true) }
         return .terminateLater
     }
@@ -175,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         hotkey.unregister()
         pauseHotkey.unregister()
-        Log.info("quit")
+        Log.info(.session, "quit")
     }
 
     // MARK: Menu

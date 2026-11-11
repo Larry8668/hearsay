@@ -78,6 +78,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let echoItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
+    private let verboseItem = NSMenuItem()
     var onMenuWillOpen: (() -> Void)?
     var menuDescription: String { DebugSnapshot.describe(menu) }
 
@@ -208,6 +209,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
         // Troubleshooting ▸
         let trouble = NSMenu()
         trouble.addItem(item("Open logs", #selector(openLogs)))
+        trouble.addItem(item("Export diagnostics…", #selector(exportDiagnostics)))
+        verboseItem.title = "Verbose logging (includes transcript text)"
+        verboseItem.target = self
+        verboseItem.action = #selector(toggleVerbose)
+        trouble.addItem(verboseItem)
         trouble.addItem(item("Microphone settings…", #selector(openMicSettings)))
         trouble.addItem(item("System audio settings…", #selector(openTapSettings)))
         trouble.addItem(item("Relaunch hearsay", #selector(relaunch)))
@@ -339,6 +345,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func chooseFont(_ sender: NSMenuItem) { actions.setFontSize(Double(sender.tag) / 10) }
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
+    @objc private func exportDiagnostics() { MainActor.assumeIsolated { Diagnostics.exportInteractively() } }
+    @objc private func toggleVerbose() { Log.verboseText.toggle(); verboseItem.state = Log.verboseText ? .on : .off }
     @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
@@ -350,5 +358,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func toggleUpdateChecks() { actions.toggleUpdateChecks() }
     @objc private func quit() { actions.quit() }
 
-    func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
+    func menuWillOpen(_ menu: NSMenu) {
+        verboseItem.state = Log.verboseText ? .on : .off
+        onMenuWillOpen?()
+    }
 }

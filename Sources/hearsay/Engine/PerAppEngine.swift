@@ -62,7 +62,7 @@ actor PerAppEngine: TranscriptionEngine {
                 await self?.closeIdle()
             }
         }
-        Log.info("engine per-app: started for \(speaker.rawValue)")
+        Log.info(.engine, "engine per-app: started for \(speaker.rawValue)")
         return events
     }
 
@@ -72,7 +72,7 @@ actor PerAppEngine: TranscriptionEngine {
         if streams[app] == nil {
             guard Self.rms(chunk.samples) >= Self.voiceFloor else { return }
             guard streams.count < Self.maxStreams else {
-                if !warnedLimit { Log.warn("engine per-app: \(Self.maxStreams) streams open; not transcribing \(app)"); warnedLimit = true }
+                if !warnedLimit { Log.warn(.engine, "engine per-app: \(Self.maxStreams) streams open; not transcribing \(app)"); warnedLimit = true }
                 return
             }
             guard let s = await open(app) else { return }
@@ -90,7 +90,7 @@ actor PerAppEngine: TranscriptionEngine {
             for (_, s) in open { group.addTask { await s.engine.stop(); await s.forwarder.value } }
         }
         if warm == nil, let s = open.values.first { warm = s.engine }
-        if !open.isEmpty { Log.info("engine per-app: closed \(open.count) stream\(open.count == 1 ? "" : "s")") }
+        if !open.isEmpty { Log.info(.engine, "engine per-app: closed \(open.count) stream\(open.count == 1 ? "" : "s")") }
         out?.finish(); out = nil
         warnedLimit = false
     }
@@ -105,17 +105,17 @@ actor PerAppEngine: TranscriptionEngine {
         } else {
             engine = make()
             do { try await engine.prepare { _ in } } catch {
-                Log.error("engine per-app: could not load a model for \(app): \(error.localizedDescription)")
+                Log.error(.engine, "engine per-app: could not load a model for \(app): \(error.localizedDescription)")
                 return nil
             }
         }
         do {
             let events = try await engine.start(speaker: speaker)
             let forwarder = Task.detached(priority: .userInitiated) { for await e in events { out.yield(e) } }
-            Log.info("engine per-app: stream opened for \(app.isEmpty ? "unknown app" : app) (\(streams.count + 1) open)")
+            Log.info(.engine, "engine per-app: stream opened for \(app.isEmpty ? "unknown app" : app) (\(streams.count + 1) open)")
             return Stream(engine: engine, forwarder: forwarder, lastChunk: .now)
         } catch {
-            Log.error("engine per-app: start for \(app) failed: \(error.localizedDescription)")
+            Log.error(.engine, "engine per-app: start for \(app) failed: \(error.localizedDescription)")
             warm = engine
             return nil
         }
@@ -126,7 +126,7 @@ actor PerAppEngine: TranscriptionEngine {
         await s.engine.stop()
         await s.forwarder.value
         if warm == nil { warm = s.engine }
-        Log.info("engine per-app: stream closed for \(app.isEmpty ? "unknown app" : app) (\(streams.count) open)")
+        Log.info(.engine, "engine per-app: stream closed for \(app.isEmpty ? "unknown app" : app) (\(streams.count) open)")
     }
 
     private func closeIdle() async {

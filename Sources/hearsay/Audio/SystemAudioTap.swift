@@ -92,7 +92,7 @@ final class SystemAudioTap: AudioSource {
         continuation = nil
         c?.onTermination = nil   // finish() would call it synchronously, re-entering this queue
         c?.finish()
-        Log.info("systemtap: stopped after \(ioCallbacks) IO callbacks")
+        Log.info(.tap, "systemtap: stopped after \(ioCallbacks) IO callbacks")
         ioCallbacks = 0
     }
 
@@ -160,7 +160,7 @@ final class SystemAudioTap: AudioSource {
         err = AudioDeviceStart(agg, procID)
         guard err == noErr else { throw AudioSourceError.coreAudio(err, "AudioDeviceStart") }
         updateDisplayName()
-        Log.info("systemtap: started (\(displayName)) tap \(Int(format.sampleRate)) Hz × \(format.channelCount) ch")
+        Log.info(.tap, "systemtap: started (\(displayName)) tap \(Int(format.sampleRate)) Hz × \(format.channelCount) ch")
     }
 
     private func tapFormat() throws -> AVAudioFormat {
@@ -183,7 +183,7 @@ final class SystemAudioTap: AudioSource {
         ioProcID = nil
         if aggregateID != CA.unknown {
             let err = AudioHardwareDestroyAggregateDevice(aggregateID)
-            if err != noErr { Log.warn("systemtap: destroy aggregate failed: \(err)") }
+            if err != noErr { Log.warn(.tap, "systemtap: destroy aggregate failed: \(err)") }
             aggregateID = CA.unknown
         }
     }
@@ -192,7 +192,7 @@ final class SystemAudioTap: AudioSource {
         tearDownAggregate()
         if tapID != CA.unknown {
             let err = AudioHardwareDestroyProcessTap(tapID)
-            if err != noErr { Log.warn("systemtap: destroy tap failed: \(err)") }
+            if err != noErr { Log.warn(.tap, "systemtap: destroy tap failed: \(err)") }
             tapID = CA.unknown
         }
     }
@@ -200,7 +200,7 @@ final class SystemAudioTap: AudioSource {
     private func process(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
         guard let continuation, let resampler else { return }
         ioCallbacks += 1
-        if ioCallbacks == 1 { Log.info("systemtap: first IO buffer (\(buffer.frameLength) frames)") }
+        if ioCallbacks == 1 { Log.info(.tap, "systemtap: first IO buffer (\(buffer.frameLength) frames)") }
         let samples = resampler.convert(buffer)
         let start = hostTime.map(CA.date(fromHostTime:))
         for chunk in assembler.append(samples, startTime: start, sourceApps: sourceApps) { continuation.yield(chunk) }
@@ -235,10 +235,10 @@ final class SystemAudioTap: AudioSource {
         let current = ioQueue.sync { resampler?.inputFormat }
         let new = try? tapFormat()
         if aggregateID != CA.unknown, new == current {
-            Log.info("systemtap: default output changed; now \(displayName), tap format unchanged")
+            Log.info(.tap, "systemtap: default output changed; now \(displayName), tap format unchanged")
             return
         }
-        Log.info("systemtap: default output changed; tap format now \(new.map { "\($0)" } ?? "unknown"); rebuilding aggregate")
+        Log.info(.tap, "systemtap: default output changed; tap format now \(new.map { "\($0)" } ?? "unknown"); rebuilding aggregate")
         tearDownAggregate()
         ioQueue.sync {
             if let tail = resampler?.flush(), !tail.isEmpty {
@@ -246,7 +246,7 @@ final class SystemAudioTap: AudioSource {
             }
         }
         do { try buildAggregate() } catch {
-            Log.error("systemtap: rebuild failed: \(error.localizedDescription); waiting for the next output change")
+            Log.error(.tap, "systemtap: rebuild failed: \(error.localizedDescription); waiting for the next output change")
             tearDownAggregate()
         }
     }

@@ -26,14 +26,14 @@ extension SessionController {
                 echo.observeThemFinal(text: line.text, start: line.start, end: line.end)
             } else if case .echo(let why) = echo.checkMeFinal(text: line.text, start: line.start, end: line.end,
                                                               levelGap: levelGap(from: line.start, to: line.end)) {
-                Log.info("echo filter: dropped me-line (\(why)): \"\(line.text.prefix(60))\"")
+                Log.info(.engine, "echo filter: dropped me-line (\(why)): \(Log.describe(text: line.text))")
                 model.discardPartial(.me)
                 return
             }
             store?.insert(line)
             model.insert(line)
         case .warning(let message):
-            Log.warn("engine: \(message)")
+            Log.warn(.engine, "engine: \(message)")
             showWarning(message)
         }
     }

@@ -94,7 +94,7 @@ final class RecordingBar: NSObject {
     /// truth: writing it brings `apply(mode:)` round.
     func setMode(_ m: Mode) {
         guard m != model.barMode else { return }
-        Log.info("recording bar: \(m.rawValue)")
+        Log.info(.ui, "recording bar: \(m.rawValue)")
         model.barMode = m
     }
 
@@ -121,7 +121,7 @@ final class RecordingBar: NSObject {
         p.setFrame(start, display: false)
         p.alphaValue = 0
         p.orderFrontRegardless()
-        Log.info("recording \(m.rawValue) shown at \(Int(target.midX)),\(Int(target.minY + Self.margin))")
+        Log.info(.ui, "recording \(m.rawValue) shown at \(Int(target.midX)),\(Int(target.minY + Self.margin))")
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = slide ? 0.5 : 0.25
             // y control point > 1 overshoots a little: a cheap spring for a window frame.
@@ -159,7 +159,7 @@ final class RecordingBar: NSObject {
             guard let self = self, !(self.wantVisible && self.mode == m) else { return }
             p.orderOut(nil)
             p.alphaValue = 0
-            Log.info("recording \(m.rawValue) hidden")
+            Log.info(.ui, "recording \(m.rawValue) hidden")
         }
     }
 
@@ -226,7 +226,7 @@ final class RecordingBar: NSObject {
     /// rule is why the pill is a second window rather than the bar shrinking.
     func toggleCaptions() {
         let on = !state.captions
-        Log.info("recording bar: captions \(on ? "shown" : "hidden")")
+        Log.info(.ui, "recording bar: captions \(on ? "shown" : "hidden")")
         Prefs.store.set(on, forKey: Self.captionsKey)
         withAnimation(on ? .easeOut(duration: 0.25) : .easeIn(duration: 0.2)) { state.captions = on }
     }
@@ -284,7 +284,7 @@ final class RecordingBar: NSObject {
         guard let p = panels[m], let key = Self.anchorKeys[m] else { return }
         let a = NSPoint(x: p.frame.midX, y: p.frame.minY + Self.margin)
         Prefs.store.set([Double(a.x), Double(a.y)], forKey: key)
-        Log.info("recording \(m.rawValue) moved to \(Int(a.x)),\(Int(a.y))")
+        Log.info(.ui, "recording \(m.rawValue) moved to \(Int(a.x)),\(Int(a.y))")
     }
 
     /// Double-click on the background: forget the dragged spot, back to bottom-centre.

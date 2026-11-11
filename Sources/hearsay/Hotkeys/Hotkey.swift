@@ -49,10 +49,10 @@ final class Hotkey {
         let status = RegisterEventHotKey(keyCode, modifiers, hkID, GetApplicationEventTarget(), 0, &r)
         if status == noErr, let r = r {
             ref = r
-            Log.info("hotkey \(display) registered")
+            Log.info(.ui, "hotkey \(display) registered")
         } else {
             // Another app owns the combo (eventHotKeyExistsErr). The menu item still works.
-            Log.warn("RegisterEventHotKey(\(display)) failed: \(status)")
+            Log.warn(.ui, "RegisterEventHotKey(\(display)) failed: \(status)")
         }
     }
 

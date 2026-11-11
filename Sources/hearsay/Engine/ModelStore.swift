@@ -82,20 +82,20 @@ actor ModelStore {
     /// Every caller awaiting the download gets a `CancellationError`.
     func pauseDownload(_ variant: StreamingModelVariant) {
         guard let task = downloads[variant] else { return }
-        Log.info("models: pausing download of \(variant.rawValue)")
+        Log.info(.model, "models: pausing download of \(variant.rawValue)")
         task.cancel()
     }
 
     /// Stops the download and deletes what it fetched so far (nothing of the variant stays on disk).
     func cancelDownload(_ variant: StreamingModelVariant) async {
         if let task = downloads[variant] {
-            Log.info("models: cancelling download of \(variant.rawValue)")
+            Log.info(.model, "models: cancelling download of \(variant.rawValue)")
             task.cancel()
             _ = try? await task.value
         }
         let dir = Self.directory(for: variant)
         if FileManager.default.fileExists(atPath: dir.path) {
-            do { try FileManager.default.removeItem(at: dir) } catch { Log.warn("models: could not remove \(dir.path): \(error)") }
+            do { try FileManager.default.removeItem(at: dir) } catch { Log.warn(.model, "models: could not remove \(dir.path): \(error)") }
         }
     }
     private var spare: [StreamingModelVariant: [any StreamingAsrManager]] = [:]
@@ -110,7 +110,7 @@ actor ModelStore {
         }
         let task = Task {
             let started = Date()
-            Log.info("models: downloading \(variant.rawValue) to \(Self.modelDirectory.path)")
+            Log.info(.model, "models: downloading \(variant.rawValue) to \(Self.modelDirectory.path)")
             ModelHub.offlineMode = false
             // Loading through the manager is the only public path that knows each family's file
             // set; the warmed-up manager is kept for the first engine that asks.
@@ -118,7 +118,7 @@ actor ModelStore {
             try await Self.load(manager, progress: { p in progress(.downloading(fraction: p.fractionCompleted)) })
             self.keepSpare(manager, for: variant)
             let mb = Double(Self.diskSize(variant)) / 1_048_576
-            Log.info("models: \(variant.rawValue) ready, \(String(format: "%.0f", mb)) MB in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
+            Log.info(.model, "models: \(variant.rawValue) ready, \(String(format: "%.0f", mb)) MB in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
         }
         downloads[variant] = task
         defer { downloads[variant] = nil }
@@ -149,7 +149,7 @@ actor ModelStore {
         let manager = Self.makeRawManager(variant)
         let t0 = Date()
         try await Self.load(manager, progress: nil)
-        Log.info("models: loaded \(variant.rawValue) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+        Log.info(.model, "models: loaded \(variant.rawValue) in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
         return manager
     }
 
