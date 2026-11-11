@@ -86,7 +86,8 @@ final class CaptionsFeed: ObservableObject {
             guard let self = self else { return }
             self.pending = false
             self.lastRun = Date()
-            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt)
+            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt,
+                        names: self.model.liveNames)
         }
     }
 
@@ -98,10 +99,11 @@ final class CaptionsFeed: ObservableObject {
         timer?.invalidate(); timer = nil
         active = on
         guard on else { return }
-        update(lines: model.lines, partials: model.partials, discards: model.discards, session: model.startedAt)
+        update(lines: model.lines, partials: model.partials, discards: model.discards, session: model.startedAt, names: model.liveNames)
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt)
+            self.update(lines: self.model.lines, partials: self.model.partials, discards: self.model.discards, session: self.model.startedAt,
+                        names: self.model.liveNames)
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -114,8 +116,9 @@ final class CaptionsFeed: ObservableObject {
 
     /// Derives the blocks from the model's lines and partials. Internal so a test can drive it
     /// with its own clock; the app calls it through `schedule()` and the expiry timer.
+    /// `names`: the session's voice names; a rename changes a block's chip, so the bar follows.
     func update(lines all: [TranscriptLine], partials: [Voice: String], discards: [Voice: Int] = [:],
-                session: Date?, now: Date = Date()) {
+                session: Date?, now: Date = Date(), names: VoiceNames = VoiceNames()) {
         if session != sessionStart {
             // A new session (or none): nothing from the last one may show. Not keyed on the
             // transcript being empty: that is also true for the whole first utterance, and
@@ -168,7 +171,7 @@ final class CaptionsFeed: ObservableObject {
             let committed = lines[v] ?? []
             let partial = Self.capped(shownPartial[v] ?? "")
             guard !committed.isEmpty || !partial.isEmpty else { continue }
-            next.append(Block(voice: v, chip: LaneColors.chipLabel(v.speaker, app: v.app), committed: committed, partial: partial))
+            next.append(Block(voice: v, chip: LaneColors.chipLabel(v, names: names), committed: committed, partial: partial))
         }
         order.removeAll { lastActivity[$0] == nil }
         // Too many voices: keep me and the most recently active apps.

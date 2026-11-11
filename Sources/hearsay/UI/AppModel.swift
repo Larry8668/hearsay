@@ -23,6 +23,16 @@ final class AppModel: ObservableObject {
     /// from the window and from its Copy / Export SRT. The files on disk always get every line.
     /// Reset when a session starts.
     @Published var hiddenVoices: Set<Voice> = []
+    /// Title, tags and voice names of the current (or last) session, mirrored from its
+    /// `TranscriptStore` so the window can show and edit them; `actions.setLiveMeta` writes
+    /// them through. Reset when a session starts.
+    @Published var liveMeta = TranscriptMeta()
+    /// Settings ▸ Your name: the default label for "me" everywhere until a transcript renames it.
+    @Published var yourName: String? = VoiceNames.storedYourName {
+        didSet { VoiceNames.storedYourName = yourName }
+    }
+    /// What the live views and the captions call each voice right now.
+    var liveNames: VoiceNames { VoiceNames(liveMeta, yourName: yourName) }
     @Published var showRecordingBar: Bool = UserDefaults.standard.object(forKey: AppModel.barKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showRecordingBar, forKey: Self.barKey) }
     }
@@ -63,6 +73,10 @@ final class AppModel: ObservableObject {
         var pauseDownload: () -> Void = {}
         var resumeDownload: () -> Void = {}
         var cancelDownload: () -> Void = {}
+        /// Title / tags / names for the live (or last) session: stored in its transcript files.
+        var setLiveMeta: (TranscriptMeta) -> Void = { _ in }
+        /// The session's transcript store (current, or the last one), for Export… of the live view.
+        var liveStore: () -> TranscriptStore? = { nil }
     }
     var actions = Actions()
 

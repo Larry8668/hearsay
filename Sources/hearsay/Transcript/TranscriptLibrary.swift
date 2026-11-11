@@ -25,9 +25,27 @@ final class TranscriptLibrary: ObservableObject {
         var apps: [String]
         var pausedTotal: TimeInterval
         var lastLineEnd: Date
+        /// Title, tags and voice names from the sidecar (empty for one saved before they existed).
+        var meta = TranscriptMeta()
+        /// Every line's text, newline-joined, for the sidebar's search. Kept per entry rather
+        /// than re-read per keystroke: a hundred transcripts are a few MB, scanned in under a
+        /// millisecond.
+        var text = ""
 
         /// Wall-clock length; an unfinished transcript ends with its last line.
         var duration: TimeInterval { max(0, (endedAt ?? lastLineEnd).timeIntervalSince(startedAt)) }
+
+        /// Sidebar search: the query (trimmed; empty matches all) anywhere in the title, a tag,
+        /// a voice's name or the lines' text, ignoring case and accents.
+        func matches(_ query: String) -> Bool {
+            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !q.isEmpty else { return true }
+            let opts: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+            if let t = meta.title, t.range(of: q, options: opts) != nil { return true }
+            if meta.tags.contains(where: { $0.range(of: q, options: opts) != nil }) { return true }
+            if meta.names.values.contains(where: { $0.range(of: q, options: opts) != nil }) { return true }
+            return text.range(of: q, options: opts) != nil
+        }
     }
 
     /// A transcript opened in the main window: the sidecar in full.
@@ -35,6 +53,14 @@ final class TranscriptLibrary: ObservableObject {
         var entry: Entry
         var lines: [TranscriptLine]
         var pauses: [PauseInterval]
+        var meta: TranscriptMeta { entry.meta }
+    }
+
+    /// Every tag in use, most used first, for the tag field's suggestions.
+    var allTags: [String] {
+        var counts: [String: Int] = [:]
+        for e in entries { for t in e.meta.tags { counts[t, default: 0] += 1 } }
+        return counts.keys.sorted { counts[$0]! != counts[$1]! ? counts[$0]! > counts[$1]! : $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     @Published private(set) var entries: [Entry] = []
@@ -112,7 +138,24 @@ final class TranscriptLibrary: ObservableObject {
         let lastEnd = side.lines.map(\.end).max() ?? side.startedAt
         let paused = (side.pauses ?? []).reduce(0) { $0 + $1.length(now: side.endedAt ?? lastEnd) }
         return Entry(jsonURL: url, startedAt: side.startedAt, endedAt: side.endedAt, engine: side.engine,
-                     lineCount: side.lines.count, apps: apps, pausedTotal: paused, lastLineEnd: lastEnd)
+                     lineCount: side.lines.count, apps: apps, pausedTotal: paused, lastLineEnd: lastEnd,
+                     meta: side.meta, text: side.lines.map(\.text).joined(separator: "\n"))
+    }
+
+    // MARK: Title, tags, names
+
+    /// Saves new title / tags / names into a saved transcript's files. The list shows the change
+    /// at once; the rewrite happens on the library's queue and the folder watcher then confirms
+    /// it from disk.
+    func setMeta(_ meta: TranscriptMeta, for entry: Entry) {
+        let url = entry.jsonURL
+        if let i = entries.firstIndex(where: { $0.jsonURL == url }), entries[i].meta != meta {
+            entries[i].meta = meta
+            cache[url]?.entry?.meta = meta   // a reload before the write lands must not bring the old one back
+        }
+        queue.async {
+            do { try TranscriptStore.updateMeta(meta, at: url) } catch { Log.error("library: could not update \(url.lastPathComponent): \(error)") }
+        }
     }
 
     // MARK: Loading one

@@ -20,6 +20,12 @@ final class MainWindowState: ObservableObject {
     @Published var hiddenPast: [URL: Set<Voice>] = [:]
     /// The inline "Move to Trash?" row is showing for the selected transcript.
     @Published var confirmingDelete = false
+    /// The header's open inline editor (title, tag field, a chip's rename), if any.
+    @Published var editing: MetaEditing?
+    /// The sidebar's search text, already debounced (`SidebarSearchField`).
+    @Published var query = ""
+    /// Settings ▸ Your name, de-duplicated from `AppModel` like `phase`.
+    @Published private(set) var yourName: String?
     /// De-duplicated copies of the two `AppModel` values the toolbar and a saved transcript need:
     /// observing them here, not `AppModel`, keeps partials (several a second) away from those views.
     @Published private(set) var phase: AppModel.Phase = .idle
@@ -31,8 +37,10 @@ final class MainWindowState: ObservableObject {
         self.library = library
         phase = model.phase
         fontSize = model.fontSize
+        yourName = model.yourName
         model.$phase.removeDuplicates().sink { [weak self] in self?.phase = $0 }.store(in: &subs)
         model.$fontSize.removeDuplicates().sink { [weak self] in self?.fontSize = $0 }.store(in: &subs)
+        model.$yourName.removeDuplicates().sink { [weak self] in self?.yourName = $0 }.store(in: &subs)
         // The shown transcript trashed (here or in Finder): fall back to Live. Changed on disk
         // (its summary differs): read it again.
         library.$entries.dropFirst().sink { [weak self] entries in
@@ -47,8 +55,18 @@ final class MainWindowState: ObservableObject {
         return library.entries.first { $0.jsonURL == url }
     }
 
+    /// Title / tags / names for the shown saved transcript: the view changes now, the files on
+    /// the library's queue.
+    func setMeta(_ meta: TranscriptMeta) {
+        guard var doc = document, doc.entry.meta != meta else { return }
+        doc.entry.meta = meta
+        document = doc
+        library.setMeta(meta, for: doc.entry)
+    }
+
     private func load() {
         confirmingDelete = false
+        editing = nil
         guard case .transcript(let url) = selection else { document = nil; return }
         document = TranscriptLibrary.load(url)
         if document == nil { Log.warn("library: could not load \(url.lastPathComponent)") }
@@ -73,45 +91,63 @@ struct MainSidebarView: View {
     let currentFile: () -> URL?
 
     var body: some View {
-        List(selection: Binding(get: { Optional(state.selection) }, set: { if let s = $0 { state.selection = s } })) {
-            LiveSidebarRow(state: state, model: model).tag(MainSelection.live)
-            let groups = Self.group(library.entries.filter { $0.jsonURL != currentFile() })
-            if groups.isEmpty {
-                Text("No transcripts yet")
-                    .font(.system(size: 11)).foregroundStyle(.tertiary)
-                    .padding(.top, 12).frame(maxWidth: .infinity, alignment: .center)
-                    .selectionDisabled()
-            }
-            ForEach(groups, id: \.day) { group in
-                Section(Self.dayTitle(group.day)) {
-                    ForEach(group.entries) { entry in
-                        row(entry).tag(MainSelection.transcript(entry.jsonURL))
+        VStack(spacing: 0) {
+            SidebarSearchField(query: $state.query)
+            List(selection: Binding(get: { Optional(state.selection) }, set: { if let s = $0 { state.selection = s } })) {
+                LiveSidebarRow(state: state, model: model).tag(MainSelection.live)
+                let searching = !state.query.trimmingCharacters(in: .whitespaces).isEmpty
+                let groups = Self.group(library.entries.filter { $0.jsonURL != currentFile() && $0.matches(state.query) })
+                if groups.isEmpty {
+                    Text(searching ? "No matches" : "No transcripts yet")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .padding(.top, 12).frame(maxWidth: .infinity, alignment: .center)
+                        .selectionDisabled()
+                }
+                ForEach(groups, id: \.day) { group in
+                    Section(Self.dayTitle(group.day)) {
+                        ForEach(group.entries) { entry in
+                            row(entry).tag(MainSelection.transcript(entry.jsonURL))
+                        }
                     }
                 }
             }
+            .listStyle(.sidebar)
         }
-        .listStyle(.sidebar)
         .onDeleteCommand { if state.selectedEntry != nil { state.confirmingDelete = true } }
         .frame(minWidth: 200)
     }
 
+    /// Title (or the start time) and length, then "14:03 · 48 lines · Zoom", then up to three
+    /// tags. The time moves to the detail line when a title takes its place.
     private func row(_ e: TranscriptLibrary.Entry) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline) {
-                Text(e.startedAt, format: .dateTime.hour().minute()).font(.system(size: 13, weight: .medium))
+                if let title = e.meta.title {
+                    Text(title).font(.system(size: 13, weight: .medium))
+                } else {
+                    Text(e.startedAt, format: .dateTime.hour().minute()).font(.system(size: 13, weight: .medium))
+                }
                 Spacer(minLength: 6)
                 Text(e.endedAt == nil ? "unfinished" : TranscriptFormatter.duration(e.duration))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Text(detail(e)).font(.system(size: 11)).foregroundStyle(.secondary)
+            if !e.meta.tags.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(e.meta.tags.prefix(3), id: \.self) { TagChip(text: $0) }
+                    if e.meta.tags.count > 3 { Text("+\(e.meta.tags.count - 3)").font(.system(size: 10)).foregroundStyle(.tertiary) }
+                }
+                .padding(.top, 1)
+            }
         }
         .lineLimit(1)
         .padding(.vertical, 2)
     }
 
-    /// "48 lines · Zoom, Chrome"
+    /// "48 lines · Zoom, Chrome", led by the start time when the title line holds the title.
     private func detail(_ e: TranscriptLibrary.Entry) -> String {
         var s = "\(e.lineCount) line\(e.lineCount == 1 ? "" : "s")"
+        if e.meta.title != nil { s = e.startedAt.formatted(.dateTime.hour().minute()) + " · " + s }
         if !e.apps.isEmpty { s += " · " + e.apps.joined(separator: ", ") }
         return s
     }

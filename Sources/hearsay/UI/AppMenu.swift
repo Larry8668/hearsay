@@ -1,6 +1,6 @@
 import AppKit
 
-/// The app's main menu (hearsay ▸ Edit ▸ View ▸ Window). An accessory app shows no menu bar,
+/// The app's main menu (hearsay ▸ File ▸ Edit ▸ View ▸ Window). An accessory app shows no menu bar,
 /// but key equivalents still route through `NSApp.mainMenu`: without an Edit menu ⌘C does
 /// nothing in the transcript's selectable text, and without a Window menu ⌘W won't close the
 /// window. While the main window is up the app is a regular one (see `MainWindow.show`) and
@@ -34,6 +34,11 @@ enum AppMenu {
         app.addItem(.separator())
         app.addItem(withTitle: "Quit hearsay", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
+        // File ▸ Export… reaches the main window's delegate through the responder chain, so ⌘E
+        // works whenever that window is key and is disabled otherwise.
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "Export…", action: #selector(MainWindow.exportTranscript), keyEquivalent: "e")
+
         let edit = NSMenu(title: "Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -62,7 +67,7 @@ enum AppMenu {
         win.addItem(.separator())
         win.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
 
-        for m in [app, edit, view, win] {
+        for m in [app, file, edit, view, win] {
             let mi = NSMenuItem(title: m.title, action: nil, keyEquivalent: "")
             mi.submenu = m
             main.addItem(mi)

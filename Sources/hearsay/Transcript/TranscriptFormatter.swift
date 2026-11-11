@@ -7,6 +7,9 @@ struct TranscriptFormatter {
     var timeZone: TimeZone = .current
     /// "us.zoom.xos" → "Zoom". Defaults to the LaunchServices lookup in `AppNames`.
     var appName: (String) -> String = { AppNames.name(for: $0) }
+    /// Display names for the voices (per transcript, then Settings ▸ Your name); injected like
+    /// the time zone so the output is deterministic under test.
+    var names = VoiceNames()
 
     // MARK: File naming
 
@@ -28,9 +31,20 @@ struct TranscriptFormatter {
     /// ```
     /// `end == nil` means the call is still going ("14:03 – in progress"). Each pause becomes a
     /// marker line placed where it happened, so a reader knows the gap in the text is deliberate.
-    func markdown(lines: [TranscriptLine], start: Date, end: Date?, engine: String, pauses: [PauseInterval] = []) -> String {
-        var out = "# Call transcript — \(headerRange(start: start, end: end, pauses: pauses))\n"
+    ///
+    /// With a title the H1 is the title and the date range moves to the line under it; tags go
+    /// first in the italic line ("Tags: planning, q4 · Apps heard: …"):
+    /// ```
+    /// # Design review
+    /// Sun 9 Nov 2026, 14:03–14:41 (38 min)
+    /// _Tags: design, q4 · Apps heard: Zoom · Engine: … · Made with hearsay, on this Mac._
+    /// ```
+    func markdown(lines: [TranscriptLine], start: Date, end: Date?, engine: String, pauses: [PauseInterval] = [],
+                  meta info: TranscriptMeta = TranscriptMeta()) -> String {
+        let range = headerRange(start: start, end: end, pauses: pauses)
+        var out = info.title.map { "# \(escape($0))\n\(range)\n" } ?? "# Call transcript — \(range)\n"
         var meta: [String] = []
+        if !info.tags.isEmpty { meta.append("Tags: " + info.tags.joined(separator: ", ")) }
         let apps = appsHeard(lines)
         if !apps.isEmpty { meta.append("Apps heard: " + apps.joined(separator: ", ")) }
         meta.append("Engine: \(engine)")
@@ -91,8 +105,10 @@ struct TranscriptFormatter {
         return "\(minutes / 60) h " + String(format: "%02d min", minutes % 60)
     }
 
-    /// "me", "them (Zoom)", or "them" when the app is unknown.
+    /// The voice's display name when one is set ("Priya"), else "me", "them (Zoom)", or "them"
+    /// when the app is unknown.
     func label(_ line: TranscriptLine) -> String {
+        if let n = names.custom(Voice(line)) { return n }
         switch line.speaker {
         case .me: return "me"
         case .them: return line.sourceApp.map { "them (\(appName($0)))" } ?? "them"
@@ -142,6 +158,12 @@ struct TranscriptFormatter {
     /// "[14:03:12] me: So the deadline moves to Friday?" — for the clipboard.
     func plainText(lines: [TranscriptLine]) -> String {
         lines.map { "[\(format($0.start, "HH:mm:ss"))] \(label($0)): \($0.text)" }.joined(separator: "\n")
+    }
+
+    /// "me: So the deadline moves to Friday?" — one line each, no times (the .txt export: a
+    /// transcript to paste into notes or a prompt).
+    func plainLines(lines: [TranscriptLine]) -> String {
+        lines.map { "\(label($0)): \($0.text)" }.joined(separator: "\n")
     }
 
     func clock(_ date: Date) -> String { format(date, "HH:mm:ss") }
