@@ -101,7 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             pauseDownload: { [weak self] in self?.session.pauseDownload() },
             resumeDownload: { [weak self] in self?.session.resumeDownload() },
-            cancelDownload: { [weak self] in self?.session.cancelDownload() })
+            cancelDownload: { [weak self] in self?.session.cancelDownload() },
+            setLiveMeta: { [weak self] meta in
+                guard let self = self else { return }
+                self.session.store?.meta = meta     // written with the next save (or at once, once a file exists)
+                if self.model.liveMeta != meta { self.model.liveMeta = meta }
+            },
+            liveStore: { [weak self] in self?.session.store })
         // The bar's transcript button toggles the main window on its Live view.
         bar = RecordingBar(model: model, actions: RecordingBar.Actions(
             togglePause: { [weak self] in self?.session.togglePause() },
@@ -201,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self.refresh()
             },
+            setYourName: { [weak self] in self?.askYourName() },
             showWelcome: { [weak self] in self?.welcome.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
             openSettings: { SettingsLinks.open(for: $0) },
@@ -254,7 +261,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.fontSize = model.fontSize
         s.echoCancellation = EchoCancellation.current.rawValue
         s.engine = model.engineID
+        s.yourName = model.yourName
         menuBar.update(s)
+    }
+
+    /// Settings ▸ Your name…: the default label for "me" in chips, captions, Markdown and SRT
+    /// (a transcript's own rename still wins). An alert with a field: it is set once, so a
+    /// settings window for one line would be more than it deserves. Blank clears it.
+    private func askYourName() {
+        let a = NSAlert()
+        a.messageText = "Your name"
+        a.informativeText = "Used instead of \"me\" in transcripts, captions and exports. Leave empty to keep \"me\"."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "me"
+        field.stringValue = model.yourName ?? ""
+        a.accessoryView = field
+        a.window.initialFirstResponder = field
+        a.addButton(withTitle: "Save")
+        a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        model.yourName = TranscriptMeta.cleanTitle(field.stringValue)
+        Log.info("your name \(model.yourName == nil ? "cleared" : "set")")
+        refresh()
     }
 
     private func refreshVersion() {

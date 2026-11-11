@@ -20,6 +20,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var setRecordingBarMode: (String) -> Void = { _ in }
         var setFontSize: (Double) -> Void
         var setEchoCancellation: (String) -> Void   // EchoCancellation raw value
+        /// Settings ▸ Your name…: asks for the name used for "me". Defaulted so the delegate wires it up when it can.
+        var setYourName: () -> Void = {}
         var showWelcome: () -> Void
         var openLogs: () -> Void
         var openSettings: (Speaker) -> Void
@@ -50,6 +52,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var fontSize: Double = 13
         var echoCancellation = "auto"
         var engine = ""
+        /// Settings ▸ Your name, shown in the item's title.
+        var yourName: String?
     }
 
     private let item: NSStatusItem
@@ -76,6 +80,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let updateChecksItem = NSMenuItem()
     private let fontItem = NSMenuItem()
     private let echoItem = NSMenuItem()
+    private let yourNameItem = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
     var onMenuWillOpen: (() -> Void)?
@@ -196,6 +201,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
         }
         fontItem.submenu = fonts
         settings.addItem(fontItem)
+        yourNameItem.title = "Your name…"
+        yourNameItem.toolTip = "What \"me\" is called in transcripts, captions and exports"
+        bind(yourNameItem, #selector(setYourName))
+        settings.addItem(yourNameItem)
         engineItem.isEnabled = false
         settings.addItem(engineItem)
         menu.addItem(submenu("Settings", settings))
@@ -286,6 +295,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         for mi in fontItem.submenu?.items ?? [] { mi.state = Double(mi.tag) / 10 == s.fontSize ? .on : .off }
         for mi in echoItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == s.echoCancellation ? .on : .off }
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
+        yourNameItem.title = s.yourName.map { "Your name: \($0)…" } ?? "Your name…"
     }
 
     /// Footer: "hearsay 0.1.0 — up to date" or "⬆ Update available: 0.1.1", submenu with actions.
@@ -330,6 +340,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func showWelcome() { actions.showWelcome() }
     @objc private func openLogs() { actions.openLogs() }
     @objc private func chooseEcho(_ sender: NSMenuItem) { actions.setEchoCancellation(sender.representedObject as? String ?? "auto") }
+    @objc private func setYourName() { actions.setYourName() }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
     @objc private func relaunch() { actions.relaunch() }

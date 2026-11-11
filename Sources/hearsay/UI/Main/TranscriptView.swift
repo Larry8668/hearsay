@@ -14,6 +14,8 @@ struct TranscriptView: View {
     let fontSize: Double
     /// Live: start at the bottom and follow new lines. Saved: start at the top, no following.
     var follow = false
+    /// What the chips call each voice. A value: a rename re-renders the list once, like a filter change.
+    var names = VoiceNames()
     @State private var atBottom = true
     @State private var newLines = false
 
@@ -118,8 +120,7 @@ struct TranscriptView: View {
     /// only "me" / "them" doesn't reserve room for "them · Microsoft Teams".
     private var chipWidth: CGFloat {
         var labels = Set(["them"])
-        for case let app? in Set(lines.map(\.sourceApp)) { labels.insert(LaneColors.chipLabel(.them, app: app)) }
-        for case let app? in partials.keys.map(\.app) { labels.insert(LaneColors.chipLabel(.them, app: app)) }   // a voice with no line yet
+        for v in Set(lines.map { Voice($0) }).union(partials.keys) { labels.insert(LaneColors.chipLabel(v, names: names)) }   // partials: a voice with no line yet
         let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         let widest = labels.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 30
         return min(130, ceil(widest) + 16)
@@ -147,7 +148,7 @@ struct TranscriptView: View {
     private func row(_ line: TranscriptLine, chip: Bool, compact: Bool) -> some View {
         layout(compact: compact) {
             if chip {
-                Chip(text: LaneColors.chipLabel(line.speaker, app: line.sourceApp), color: LaneColors.adaptive(line.speaker), size: 11)
+                Chip(text: LaneColors.chipLabel(Voice(line), names: names), color: LaneColors.adaptive(line.speaker), size: 11)
             } else if !compact {
                 // Invisible stand-in keeps the column's width and the row's text baseline.
                 Chip(text: "me", color: .clear, size: 11).hidden()
@@ -171,7 +172,7 @@ struct TranscriptView: View {
     /// hypothesis that hasn't committed yet never fills the window.
     private func partialRow(_ v: Voice, _ text: String, compact: Bool, textWidth: CGFloat) -> some View {
         layout(compact: compact) {
-            Chip(text: LaneColors.chipLabel(v.speaker, app: v.app), color: LaneColors.adaptive(v.speaker), size: 11)
+            Chip(text: LaneColors.chipLabel(v, names: names), color: LaneColors.adaptive(v.speaker), size: 11)
         } time: {
             TypingDots()
         } text: {
@@ -201,33 +202,24 @@ private struct BottomKey: PreferenceKey {
 }
 
 /// One toggle chip per voice in the shown transcript. Off = the voice's lines are hidden from the
-/// view (and its Copy / Export SRT), drawn hollow so it can be turned back on; "Show all" when
-/// anything is off.
+/// view (and its Copy / exports), drawn hollow so it can be turned back on; "Show all" when
+/// anything is off. Each chip can also be renamed in place (`VoiceChip`); `renaming` is the
+/// one being edited.
 struct VoiceFilterBar: View {
     let voices: [Voice]
     let hidden: Set<Voice>
+    var names = VoiceNames()
+    @Binding var renaming: Voice?
     let toggle: (Voice) -> Void
     let showAll: () -> Void
+    var rename: (Voice, String?) -> Void = { _, _ in }
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(voices, id: \.self) { v in
-                let off = hidden.contains(v)
-                Button { toggle(v) } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: off ? "eye.slash" : "checkmark").font(.system(size: 8.5, weight: .bold))
-                        Text(LaneColors.chipLabel(v.speaker, app: v.app))
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(off ? Color.secondary : LaneColors.adaptive(v.speaker))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(off ? Color.clear : LaneColors.adaptive(v.speaker).opacity(0.16)))
-                    .overlay(Capsule().strokeBorder(off ? Color.primary.opacity(0.18) : Color.clear, lineWidth: 1))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .help(off ? "Show \(LaneColors.chipLabel(v.speaker, app: v.app))" : "Hide \(LaneColors.chipLabel(v.speaker, app: v.app))")
+                VoiceChip(voice: v, label: LaneColors.chipLabel(v, names: names), customName: names.names[v.key], off: hidden.contains(v),
+                          renaming: Binding(get: { renaming == v }, set: { renaming = $0 ? v : (renaming == v ? nil : renaming) }),
+                          toggle: { toggle(v) }, rename: { rename(v, $0) })
             }
             if !hidden.isEmpty {
                 Button("Show all", action: showAll)

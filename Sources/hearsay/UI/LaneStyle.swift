@@ -24,11 +24,14 @@ enum LaneColors {
         })
     }
 
-    /// "me", "them · Zoom", or "them" when the app is unknown.
+    /// "me", "them · Zoom", or "them" when the app is unknown: the built-in label.
     static func chipLabel(_ s: Speaker, app: String?) -> String {
-        guard s == .them, let app = app else { return s.rawValue }
-        return "them · \(AppNames.name(for: app))"
+        VoiceNames.defaultChipLabel(Voice(speaker: s, app: app))
     }
+
+    /// The label with names applied: the transcript's own name for the voice, else Settings ▸
+    /// Your name for "me", else the built-in label (`VoiceNames`).
+    static func chipLabel(_ v: Voice, names: VoiceNames) -> String { names.chipLabel(v) }
 }
 
 /// Small capsule label: "me", "them · Zoom".

@@ -40,6 +40,9 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
             self?.updateTitle()
             self?.onVisibilityChange?()
         }.store(in: &subs)
+        // A title given or changed (saved transcript, or the live session) renames the window too.
+        state.$document.map { $0?.meta.title }.removeDuplicates().dropFirst().sink { [weak self] _ in self?.updateTitle() }.store(in: &subs)
+        model.$liveMeta.map(\.title).removeDuplicates().dropFirst().sink { [weak self] _ in self?.updateTitle() }.store(in: &subs)
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
@@ -102,10 +105,10 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
     private func updateTitle(_ w: NSWindow? = nil) {
         guard let w = w ?? window else { return }
         switch state.selection {
-        case .live: w.title = "Live transcript — hearsay"
+        case .live: w.title = (model.liveMeta.title ?? "Live transcript") + " — hearsay"
         case .transcript:
             let e = state.selectedEntry
-            w.title = e.map { TranscriptFormatter().dateRange(start: $0.startedAt, end: $0.endedAt) + " — hearsay" } ?? "hearsay"
+            w.title = e.map { ($0.meta.title ?? TranscriptFormatter().dateRange(start: $0.startedAt, end: $0.endedAt)) + " — hearsay" } ?? "hearsay"
         }
     }
 
@@ -157,12 +160,13 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         case Item.more:
             let item = NSMenuToolbarItem(itemIdentifier: id)
             item.label = "More"
-            item.toolTip = "Export, reveal, open, delete"
+            item.toolTip = "Export, copy, reveal, open, delete"
             item.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "More")
             item.showsIndicator = false
             let menu = NSMenu()
             menu.delegate = self        // rebuilt for the selection each time it opens
             item.menu = menu
+            moreMenu = menu
             return item
         default:
             return nil
@@ -178,21 +182,30 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         return item
     }
 
+    /// The ⋯ menu, kept so the dev script can open it.
+    private var moreMenu: NSMenu?
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let past = state.selectedEntry != nil
-        let add = { (title: String, sel: Selector) -> NSMenuItem in
-            let mi = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+        let add = { (title: String, sel: Selector, key: String) -> NSMenuItem in
+            let mi = NSMenuItem(title: title, action: sel, keyEquivalent: key)
             mi.target = self
             menu.addItem(mi)
             return mi
         }
-        add("Export subtitles (.srt)", #selector(exportSRT)).isEnabled = !shownLines().isEmpty
-        _ = add("Reveal in Finder", #selector(revealInFinder))
-        _ = add(past ? "Open in editor" : "Open transcript file", #selector(openTranscript))
+        let some = !shownLines().isEmpty
+        add("Export…", #selector(exportTranscript), "e").isEnabled = some
+        add("Export subtitles (.srt)", #selector(exportSRT), "").isEnabled = some
+        menu.addItem(.separator())
+        add("Copy as text", #selector(copyTranscript), "").isEnabled = some
+        add("Copy as Markdown", #selector(copyMarkdown), "").isEnabled = some
+        menu.addItem(.separator())
+        _ = add("Reveal in Finder", #selector(revealInFinder), "")
+        _ = add(past ? "Open in editor" : "Open transcript file", #selector(openTranscript), "")
         if past {
             menu.addItem(.separator())
-            _ = add("Move to Trash…", #selector(askDelete))
+            _ = add("Move to Trash…", #selector(askDelete), "")
         }
     }
 
@@ -204,9 +217,26 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         return model.lines.visible(hiding: model.hiddenVoices)
     }
 
+    /// What is on screen, with its names, ready for any format: the saved transcript, or the
+    /// live session straight from its store (so a title given mid-call is in the export).
+    private func shownExport() -> TranscriptExport? {
+        if let doc = state.document { return TranscriptExport(document: doc, hiding: state.hidden(for: doc.entry.jsonURL), yourName: model.yourName) }
+        return liveStore().map { TranscriptExport(store: $0, hiding: model.hiddenVoices) }
+    }
+
+    /// Copy (toolbar) and "Copy as text": "[14:03:12] me: …" per line.
     @objc private func copyTranscript() {
-        if state.selectedEntry != nil { TranscriptStore.copy(TranscriptFormatter().plainText(lines: shownLines())) }
+        if state.selectedEntry != nil, let e = shownExport() { TranscriptStore.copy(e.formatter.plainText(lines: e.lines)) }
         else { model.actions.copyAll(model.hiddenVoices) }
+    }
+
+    @objc private func copyMarkdown() {
+        if let e = shownExport() { TranscriptStore.copy(e.render(.markdown)) }
+    }
+
+    /// Export… (⋯ menu, File ▸ Export…, ⌘E): the save panel with the format popup.
+    @objc func exportTranscript() {
+        if let e = shownExport() { ExportPanel.run(e, in: window) }
     }
 
     @objc private func exportSRT() {
@@ -240,10 +270,30 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
 
     /// `window`: open · `past`: select the newest saved transcript · `hideme`: toggle the "me"
     /// chip · `delete`: show the Trash confirm · `dark` / `light`: force the appearance ·
-    /// `small` / `large`: 700×480 / 1200×800.
+    /// `small` / `large`: 700×480 / 1200×800 · `title=…`: set the shown transcript's title ·
+    /// `tags=a;b`: set its tags · `edittitle` / `addtag` / `rename`: open those inline editors
+    /// (rename: the first voice chip) · `name=…`: name the first voice · `search=…`: filter the
+    /// sidebar · `yourname=…`: Settings ▸ Your name · `more`: open the ⋯ menu · `export`: the
+    /// Export… panel.
     func scriptActions() -> [String: () -> Void] {
         [
             "window": { [weak self] in self?.show() },
+            "title": { [weak self] in self?.editMeta { $0.setTitle(DebugSnapshot.scriptArgument) } },
+            "tags": { [weak self] in self?.editMeta { $0.setTags(DebugSnapshot.scriptArgument.split(separator: ";").map(String.init)) } },
+            "name": { [weak self] in
+                guard let self = self, let v = self.shownVoices().first else { return }
+                self.editMeta { $0.setName(DebugSnapshot.scriptArgument, for: v) }
+            },
+            "edittitle": { [weak self] in self?.state.editing = .title },
+            "addtag": { [weak self] in self?.state.editing = .tag },
+            "rename": { [weak self] in if let v = self?.shownVoices().first { self?.state.editing = .rename(v) } },
+            "search": { [weak self] in self?.state.query = DebugSnapshot.scriptArgument },
+            "yourname": { [weak self] in self?.model.yourName = TranscriptMeta.cleanTitle(DebugSnapshot.scriptArgument) },
+            "more": { [weak self] in
+                guard let self = self, let menu = self.moreMenu, let view = self.window?.contentView else { return }
+                menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.maxX - 40, y: view.bounds.maxY - 4), in: view)
+            },
+            "export": { [weak self] in self?.exportTranscript() },
             "past": { [weak self] in
                 guard let self = self else { return }
                 if let e = self.library.entries.first(where: { $0.jsonURL != self.currentFile() }) { self.state.selection = .transcript(e.jsonURL) }
@@ -261,6 +311,23 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         ]
     }
 
+    /// The session's store while it runs, or the last one (Copy / Export of the live view).
+    private func liveStore() -> TranscriptStore? { model.actions.liveStore() }
+
+    private func shownVoices() -> [Voice] {
+        if let doc = state.document { return doc.lines.voices }
+        return model.lines.voices
+    }
+
+    /// Applies a change to the shown transcript's title / tags / names, saved or live.
+    private func editMeta(_ change: (inout TranscriptMeta) -> Void) {
+        if let doc = state.document {
+            var m = doc.meta; change(&m); state.setMeta(m)
+        } else {
+            var m = model.liveMeta; change(&m); model.actions.setLiveMeta(m)
+        }
+    }
+
     // MARK: Main menu
 
     /// An accessory app has no menu bar, but key equivalents still route through `NSApp.mainMenu`:
@@ -270,6 +337,10 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         let main = NSMenu()
         let app = NSMenu(title: "hearsay")
         app.addItem(withTitle: "Quit hearsay", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        // File ▸ Export… reaches the key window's delegate (this object) through the responder
+        // chain, so ⌘E works whenever the main window is up and is disabled otherwise.
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "Export…", action: #selector(MainWindow.exportTranscript), keyEquivalent: "e")
         let edit = NSMenu(title: "Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -284,7 +355,7 @@ final class MainWindow: NSObject, NSWindowDelegate, NSToolbarDelegate, NSMenuDel
         let view = NSMenu(title: "View")
         view.addItem(withTitle: "Toggle Sidebar", action: #selector(NSSplitViewController.toggleSidebar(_:)), keyEquivalent: "s")
             .keyEquivalentModifierMask = [.command, .control]
-        for m in [app, edit, view, win] {
+        for m in [app, file, edit, view, win] {
             let mi = NSMenuItem(title: m.title, action: nil, keyEquivalent: "")
             mi.submenu = m
             main.addItem(mi)

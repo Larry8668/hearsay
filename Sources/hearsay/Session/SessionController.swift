@@ -199,6 +199,7 @@ final class SessionController {
         model.lines = []
         model.partials = [:]
         model.hiddenVoices = []     // a fresh session shows every voice again
+        model.liveMeta = TranscriptMeta()   // and starts untitled, untagged, with the default names
         model.pausedTotal = 0
         model.pausedAt = nil
         model.permissionDenied = []

@@ -26,6 +26,20 @@ final class TranscriptStore {
     /// Pauses in order; the last one is open (`end == nil`) while paused.
     private(set) var pauses: [PauseInterval] = []
     let formatter: TranscriptFormatter
+    /// Title, tags and voice names (see `TranscriptMeta`). Kept here so every write, including
+    /// the final one, carries them; a change after the file exists rewrites it like a new line.
+    var meta = TranscriptMeta() {
+        didSet { if meta != oldValue, !lines.isEmpty { scheduleWrite() } }
+    }
+    /// Settings ▸ Your name at the time of each write (read then, not at creation, so a name set
+    /// mid-session reaches the file). Injected so tests are deterministic.
+    let yourName: () -> String?
+    /// `formatter` with this transcript's names applied: what every render and export uses.
+    var namedFormatter: TranscriptFormatter {
+        var f = formatter
+        f.names = VoiceNames(meta, yourName: yourName())
+        return f
+    }
     /// Fixed at creation from `startedAt`; " 2", " 3"… appended if that minute is taken.
     let markdownURL: URL
     var jsonURL: URL { markdownURL.deletingPathExtension().appendingPathExtension("json") }
@@ -38,12 +52,14 @@ final class TranscriptStore {
     let debounce: TimeInterval
 
     init(directory: URL = TranscriptStore.defaultDirectory, startedAt: Date = Date(), engine: String,
-         formatter: TranscriptFormatter = TranscriptFormatter(), debounce: TimeInterval = 1) {
+         formatter: TranscriptFormatter = TranscriptFormatter(), debounce: TimeInterval = 1,
+         yourName: @escaping () -> String? = { VoiceNames.storedYourName }) {
         self.directory = directory
         self.startedAt = startedAt
         self.engine = engine
         self.formatter = formatter
         self.debounce = debounce
+        self.yourName = yourName
         markdownURL = TranscriptStore.uniqueURL(in: directory, base: formatter.baseName(for: startedAt))
     }
 
@@ -131,11 +147,13 @@ final class TranscriptStore {
 
     private struct Snapshot { var dir: URL; var md: URL; var json: URL; var markdown: String; var sidecar: Data }
 
-    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses? }`.
-    /// `pauses` is optional so sidecars written before pause existed still decode (same version).
+    /// JSON sidecar layout: `{ version, startedAt, endedAt?, engine, lines: [TranscriptLine], pauses?,
+    /// title?, tags?, names? }`. `pauses` is optional so sidecars written before pause existed
+    /// still decode (same version); `title`, `tags` and `names` (see `TranscriptMeta`) likewise.
     struct Sidecar: Codable {
         var version = 1; var startedAt: Date; var endedAt: Date?; var engine: String; var lines: [TranscriptLine]
         var pauses: [PauseInterval]?
+        var title: String?; var tags: [String]?; var names: [String: String]?
     }
 
     /// ISO 8601 with milliseconds: whole seconds would lose the order of lines that start in the
@@ -169,10 +187,28 @@ final class TranscriptStore {
     }
 
     private func render() -> Snapshot {
-        let md = formatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses)
-        let side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        let md = namedFormatter.markdown(lines: lines, start: startedAt, end: endedAt, engine: engine, pauses: pauses, meta: meta)
+        var side = Sidecar(startedAt: startedAt, endedAt: endedAt, engine: engine, lines: lines, pauses: pauses.isEmpty ? nil : pauses)
+        side.meta = meta
         let data = (try? TranscriptStore.jsonEncoder.encode(side)) ?? Data()
         return Snapshot(dir: directory, md: markdownURL, json: jsonURL, markdown: md, sidecar: data)
+    }
+
+    /// Rewrites a saved transcript's files with new title / tags / names: the sidecar keeps every
+    /// other field as it was, and the Markdown is rendered again from the sidecar's lines (its
+    /// header carries the title and tags; its lines the names). Synchronous; call off the main
+    /// thread. The files' names never change: they are the session's start time.
+    static func updateMeta(_ meta: TranscriptMeta, at jsonURL: URL, formatter: TranscriptFormatter = TranscriptFormatter(),
+                           yourName: String? = VoiceNames.storedYourName) throws {
+        var side = try jsonDecoder.decode(Sidecar.self, from: Data(contentsOf: jsonURL))
+        side.meta = meta
+        var f = formatter
+        f.names = VoiceNames(meta, yourName: yourName)
+        let md = f.markdown(lines: side.lines, start: side.startedAt, end: side.endedAt, engine: side.engine, pauses: side.pauses ?? [], meta: meta)
+        let mdURL = jsonURL.deletingPathExtension().appendingPathExtension("md")
+        try Data(md.utf8).write(to: mdURL, options: .atomic)
+        try jsonEncoder.encode(side).write(to: jsonURL, options: .atomic)
+        Log.info("transcript: updated title/tags/names of \(jsonURL.lastPathComponent)")
     }
 
     private static func write(_ s: Snapshot) {
@@ -188,7 +224,7 @@ final class TranscriptStore {
     // MARK: Exports and Finder
 
     /// `hiding`: voices the window has turned off; they stay in the files, out of the clipboard.
-    func plainText(hiding hidden: Set<Voice> = []) -> String { formatter.plainText(lines: lines.visible(hiding: hidden)) }
+    func plainText(hiding hidden: Set<Voice> = []) -> String { namedFormatter.plainText(lines: lines.visible(hiding: hidden)) }
 
     func copyAll(hiding hidden: Set<Voice> = []) {
         TranscriptStore.copy(plainText(hiding: hidden))
@@ -203,7 +239,7 @@ final class TranscriptStore {
     @discardableResult
     func exportSRT(hiding hidden: Set<Voice> = []) -> URL? {
         TranscriptStore.writeSRT(lines: lines.visible(hiding: hidden), start: startedAt,
-                                 nextTo: markdownURL, formatter: formatter)
+                                 nextTo: markdownURL, formatter: namedFormatter)
     }
 
     /// `<transcript>.srt` beside the given transcript file; nil when there is nothing to write
