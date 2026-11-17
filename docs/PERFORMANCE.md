@@ -129,6 +129,69 @@ With exactly four voices the slots run out and such flips happen; they are why c
 name only settled speakers and a speaker is numbered only with a line (see USING.md, Tell
 speakers apart).
 
+### Sentences split between two speakers: measured, nothing changed
+
+Complaint: in a meeting of four around one MacBook, one person's sentence sometimes became two
+lines with two different speakers (one 34-minute session: 233 speaker-change cuts, the first after
+only 0.6 s of a "new" voice). Candidate fixes were measured with `hearsay --eval-speakers` (see
+EVAL-SPEAKERS.md for the data, the definitions and how to rerun) on six AMI meetings recorded by
+one microphone in the middle of the table, four people each, ten minutes each (60 min, 8,487
+reference words, ~410 reference turns), 2026-11-17, M4 MacBook Air, release build, Parakeet
+Unified 640 ms, Sortformer unless stated. The rule set in advance: adopt a change only if word
+accuracy does not drop, the split-sentence rate drops by at least 20% (relative), merged-minority
+words rise by no more than the split words saved, and WER is unchanged.
+
+| Configuration | Word acc. | Split / 100 turns (n) | strict | split words | merged lines / words | Interjections | Lines | Cuts | WER |
+|---|---|---|---|---|---|---|---|---|---|
+| **Current (hold 0.6 s)** | **95.2%** | **10.5 (43)** | **4.9** | **107** | **97 / 163** | **43.8%** | **566** | **193** | **37.5%** |
+| Noise floor: silence gap 1.15 s (not a speaker rule) | 95.2% | 10.4 (43) | 5.8 | 120 | 93 / 161 | 49.1% | 563 | 194 | 37.6% |
+| Noise floor: silence gap 1.25 s | 95.0% | 12.3 (50) | 5.4 | 119 | 97 / 167 | 47.1% | 562 | 192 | 37.8% |
+| a. hold 1.0 s | 94.6% | 9.7 (40) | 4.4 | 108 | 97 / 194 | 42.5% | 545 | 130 | 38.9% |
+| a. hold 1.5 s | 93.7% | 9.2 (38) | 4.6 | 103 | 107 / 251 | 37.7% | 532 | 78 | 38.1% |
+| a. hold 2.0 s | 92.7% | 11.8 (49) | 6.5 | 136 | 111 / 295 | 38.7% | 533 | 49 | 37.8% |
+| b. cut at a pause ≥ 0.25 s within ±1 s | 95.1% | 10.3 (42) | 5.4 | 110 | 92 / 166 | 44.8% | 566 | 193 | 37.6% |
+| c. A-B-A, ≤ 3 words, ≤ 2.5 s, gaps ≤ 1 s | 95.2% | 9.8 (40) | 4.9 | 103 | 97 / 163 | 43.8% | 566 | 193 | 37.5% |
+| c. A-B-A, ≤ 5 words, ≤ 4 s, gaps ≤ 1 s | 94.8% | 8.8 (36) | 4.6 | 99 | 97 / 163 | 38.1% | 566 | 193 | 37.5% |
+| d. word lead 0.1 s (frames before a word that decide who said it; now 0.25 s) | 95.3% | 11.7 (48) | 5.6 | 104 | 105 / 171 | 44.8% | 568 | 193 | 37.7% |
+| d. word lead 0 s | 95.3% | 12.2 (50) | 5.6 | 104 | 107 / 175 | 42.5% | 566 | 193 | 37.7% |
+| a + b: hold 1.0 s, cut at pause | 94.8% | 8.8 (36) | 4.4 | 97 | 93 / 193 | 42.5% | 544 | 129 | 38.3% |
+| a + b + c: hold 1.0 s, cut at pause, A-B-A ≤ 3 words | 94.9% | 8.5 (35) | 4.4 | 96 | 93 / 193 | 42.5% | 544 | 129 | 38.3% |
+| a + c: hold 1.0 s, A-B-A ≤ 3 words | 94.7% | 9.5 (39) | 4.4 | 107 | 97 / 194 | 42.5% | 545 | 130 | 38.9% |
+| b + c: cut at pause, A-B-A ≤ 3 words | 95.1% | 9.5 (39) | 5.4 | 106 | 92 / 166 | 44.8% | 566 | 193 | 37.6% |
+| LS-EEND (DIHARD III), hold 0.6 s | 78.2% | 13.7 (56) | 10.0 | 309 | 104 / 258 | 43.3% | 571 | 212 | 37.4% |
+| LS-EEND (AMI; not in the menu), hold 0.6 s | 62.7% | 5.9 (24) | 4.4 | 127 | 118 / 434 | 33.3% | 527 | 15 | 37.3% |
+
+What the table says:
+
+- **Nothing passes.** The largest split-rate drop is all three together (−19%, just short of
+  the bar and inside the noise below), bought with 0.3 points of accuracy, 30 more merged words
+  for 11 split words saved and +0.8 WER. Alone, the best is A-B-A smoothing of lines up to five
+  words (−16%), which costs word accuracy (−0.4 points) and a fifth of the interjections ("yeah" by B
+  between two of A's lines is usually a real "yeah"). A longer hold trades splits for merges almost
+  one for one and worse: at 1.5 s, 4 split words saved, 88 more of someone else's words inside
+  lines, 1.5 points of accuracy lost; at 2.0 s everything is worse. Cutting at a pause changes
+  nothing measurable: people hand over without one, so the pause nearest the diarizer's boundary
+  is usually the boundary already. The 0.25 s word lead in use is the best of the three tried.
+- **The noise floor is large.** Nudging the silence gap by 0.05 s, which has nothing to do with
+  speakers, moves the split rate between 10.4 and 12.3 and interjection recall by five points:
+  model resets land elsewhere and the far-field transcript shifts. Any change under ~15% is
+  inside that band.
+- **What a split is, in this data.** Read through, most split turns are one or two words at the
+  edge of a turn landing in the neighbour's line ("…belong to a dog. Thank you." with *dog* and the
+  thanks on the next speaker's line) or a stretch the diarizer gave to another slot for several seconds; the
+  first is word timing at an overlap, the second the model's own confusion, and neither is a
+  hold or smoothing problem.
+- **LS-EEND is clearly worse** at telling four people apart from one microphone (78% of words to
+  the right person against 95%, three times the split words). Its AMI-trained variant splits
+  little only because it hears almost everyone as one voice (15 cuts in an hour, 63% accuracy).
+  Sortformer stays the default and the menu advice stands.
+- **Latency.** Adopting A-B-A live would have to hold back a short line until the next one is
+  final: on these meetings 3–8% of lines, delayed by 5 s on average (median 4–6 s, up to 15 s), or
+  relabel lines after they are written. Not built, since the rule fails on accuracy alone.
+
+The experiments stay as CLI flags (`--speaker-hold`, `--cut-at-pause`, `--smooth-aba`,
+`--word-lead`) for the next idea to be measured against; the app's defaults are unchanged.
+
 ## Audio glitches
 
 Symptom: a YouTube video playing through the speakers froze for a moment whenever hearsay started,

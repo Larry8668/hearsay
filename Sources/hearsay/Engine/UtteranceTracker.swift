@@ -113,7 +113,12 @@ struct UtteranceTracker {
         var cutAtPause = false
         var cutPause: TimeInterval = 0.25
         var cutPauseWindow: TimeInterval = 1.0
-        /// Experiment (`--smooth-aba`, off): relabel short A-B-A lines (`SpeakerSmoothing`).
+        /// How far before a word's first token the diarizer frames that decide who said it begin
+        /// (`--word-lead`): the RNN-T emits a token near the end of its sound.
+        var wordLead: TimeInterval = 0.25
+        /// Experiment (`--smooth-aba`, off): relabel short A-B-A lines (`SpeakerSmoothing`). Only
+        /// `--eval-speakers` applies it, to the finished lines; the live engine never does (it
+        /// failed the measurement, docs/PERFORMANCE.md, and would delay short lines by seconds).
         var smoothABA: SpeakerSmoothing.Rule?
     }
 
@@ -366,7 +371,7 @@ struct UtteranceTracker {
             let who: Int?
             if let w = spoken(tokenFrom: toks[before].start, to: toks[before].end) {
                 // The emission sits at the word's end: whoever was heard just before it said it.
-                who = dominantSpeaker(from: w.start - Int(0.25 * rate), to: w.end)
+                who = dominantSpeaker(from: w.start - Int(config.wordLead * rate), to: w.end)
                     ?? dominantSpeaker(from: w.start - Int(0.6 * rate), to: w.end) ?? (w.start <= turnAt ? -1 : new)
             } else {
                 let seen = ages.firstSeen(toks[before].end - 1, fallback: samplesFed)

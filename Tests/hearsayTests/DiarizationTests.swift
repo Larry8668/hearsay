@@ -156,6 +156,33 @@ final class SpeakerTurnTests: XCTestCase {
         XCTAssertFalse(t.pieceTimesAligned)
     }
 
+    /// `--cut-at-pause` (an experiment, off by default): the diarizer hands over at 2.2 s, but the
+    /// pause is before "go"; the cut moves there. Never inside a word; the line still ends at the
+    /// diarizer's boundary.
+    func testCutAtPauseMovesTheWordBoundaryToTheNearestPause() {
+        func cut(atPause: Bool) -> (String, String) {
+            fed = 0
+            var cfg = tracker().config
+            cfg.cutAtPause = atPause
+            var t = UtteranceTracker(config: cfg)
+            func piece(_ text: String, _ a: Double, _ b: Double) -> (text: String, start: Int, end: Int) {
+                (text, Int(a * 16_000), Int(b * 16_000))
+            }
+            feed(&t, seconds: 4.5)
+            t.update(transcript: "so we go now")
+            t.addPieceTimes([piece(" so", 1.0, 1.2), piece(" we", 1.25, 1.45), piece(" go", 2.0, 2.1), piece(" now", 2.3, 2.5)])
+            t.observe(SpeakerFrames(finalized: [run(0, 0, 2.2), run(1, 2.2, 4.0)], tentative: []))
+            feed(&t, seconds: 1.1)
+            t.observe(SpeakerFrames(finalized: [run(1, 4.0, 5.6)], tentative: []))
+            XCTAssertEqual(t.finalReason(modelSignalledEnd: false), .speakerChange)
+            let line = t.commit(reason: .speakerChange, speaker: .me, engine: "x", modelWillReset: false, stream: "me")
+            XCTAssertEqual(line?.end.timeIntervalSince(t0) ?? 0, 2.2, accuracy: 0.001)
+            return (line?.text ?? "", t.pending)
+        }
+        XCTAssertTrue(cut(atPause: false) == ("so we go", "now"), "by the frames, \"go\" is still the first voice's")
+        XCTAssertTrue(cut(atPause: true) == ("so we", "go now"))
+    }
+
     /// Partials name the speaker of settled frames only: the look-ahead's guess ("a fourth voice")
     /// is often revised into a voice already heard, and must never reach a chip.
     func testPartialsFollowSettledFramesOnly() {
@@ -472,7 +499,7 @@ final class EnrolmentActiveTests: XCTestCase {
     }
 
     func testInTheSessionIsOnUnlessTurnedOff() {
-        let d = UserDefaults(suiteName: "hearsay.tests.enrolment")!
+        guard let d = UserDefaults(suiteName: "hearsay.tests.enrolment") else { return XCTFail("no defaults suite") }
         d.removePersistentDomain(forName: "hearsay.tests.enrolment")
         XCTAssertTrue(Enrolment.isActive(in: d), "default on")
         d.set(false, forKey: Enrolment.activeKey)

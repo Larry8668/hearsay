@@ -70,7 +70,10 @@ to the speech model and tells voices apart as they talk:
 
 - A line ends when the speaker changes, so each line is one person. A new voice has to hold the
   floor for a moment (about half a second) before a line is cut: a "yes" in the background or two
-  people briefly talking over each other does not break the line.
+  people briefly talking over each other does not break the line. Around one microphone a
+  sentence's first or last word can still land on the neighbouring speaker's line; waiting
+  longer, cutting at pauses and smoothing short lines were all measured on real meeting audio
+  and made things worse overall (PERFORMANCE.md, *Sentences split between two speakers*).
 - The chip says who: while only one voice has been heard on the microphone it just says **me**; the
   moment a second person speaks, the first becomes **Speaker 1** and the newcomer **Speaker 2**, in
   the order they first spoke. On a call it reads **them · Zoom · Speaker 2**. Each speaker gets its

@@ -169,7 +169,7 @@ enum SpeakerEval {
 /// Tracker settings the CLI can override (`--transcribe`, `--eval-speakers`), so a candidate
 /// rule is measured without a rebuild.
 enum TrackerFlags {
-    static let usage = "[--speaker-hold S] [--cut-at-pause [--cut-pause S] [--cut-window S]] [--smooth-aba [--aba-words N] [--aba-seconds S] [--aba-gap S]]"
+    static let usage = "[--speaker-hold S] [--word-lead S] [--silence-gap S] [--cut-at-pause [--cut-pause S] [--cut-window S]] [--smooth-aba [--aba-words N] [--aba-seconds S] [--aba-gap S]]"
 
     /// Applies flag `a` (reading its value from `it`); false when `a` is not a tracker flag.
     static func apply(_ a: String, _ it: inout IndexingIterator<[String]>, to cfg: inout UtteranceTracker.Config) -> Bool {
@@ -177,6 +177,10 @@ enum TrackerFlags {
         var aba = cfg.smoothABA ?? SpeakerSmoothing.Rule()
         switch a {
         case "--speaker-hold": cfg.speakerHold = value(cfg.speakerHold)
+        case "--word-lead": cfg.wordLead = value(cfg.wordLead)
+        // Not a speaker rule: nudging it shows how much the scores move when only the timing of
+        // model resets changes (the noise floor any speaker rule's effect must clear).
+        case "--silence-gap": cfg.silenceGap = value(cfg.silenceGap)
         case "--cut-at-pause": cfg.cutAtPause = true
         case "--cut-pause": cfg.cutPause = value(cfg.cutPause)
         case "--cut-window": cfg.cutPauseWindow = value(cfg.cutPauseWindow)
@@ -192,6 +196,8 @@ enum TrackerFlags {
 
     static func describe(_ c: UtteranceTracker.Config) -> String {
         var parts = [String(format: "hold %.2f s", c.speakerHold)]
+        if c.silenceGap != 1.2 { parts.append(String(format: "silence gap %.2f s", c.silenceGap)) }
+        if c.wordLead != 0.25 { parts.append(String(format: "word lead %.2f s", c.wordLead)) }
         if c.cutAtPause { parts.append(String(format: "cut at pause ≥ %.2f s within %.1f s", c.cutPause, c.cutPauseWindow)) }
         if let r = c.smoothABA { parts.append(String(format: "A-B-A ≤ %d words ≤ %.1f s, gaps ≤ %.1f s", r.maxWords, r.maxSeconds, r.maxGap)) }
         return parts.joined(separator: ", ")

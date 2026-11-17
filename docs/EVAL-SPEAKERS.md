@@ -35,13 +35,24 @@ swift build -c release
 
 Options: `--diarize sortformer|lseend|lseend-ami`, `--only NAME` (repeatable), `--dump DIR` (writes
 each meeting's lines as `NAME.lines.tsv`), `--realtime` (paced like a live session; also reports
-how long after its end each line arrived), `--variant NAME`, and the tracker experiments
-`--speaker-hold S`, `--cut-at-pause [--cut-pause S] [--cut-window S]`, `--smooth-aba [--aba-words
-N] [--aba-seconds S] [--aba-gap S]`. The same tracker flags work on `--transcribe`. No stored
-preference and no enrolled voice is used. Six meetings take about five minutes unpaced on an M4.
+how long after its end each line arrived), `--variant NAME`, `--rescore DIR` (score the lines of
+an earlier `--dump` instead of running the models: for rules applied after the fact, such as
+`--smooth-aba`), and the tracker experiments `--speaker-hold S`, `--word-lead S`, `--cut-at-pause
+[--cut-pause S] [--cut-window S]`, `--smooth-aba [--aba-words N] [--aba-seconds S] [--aba-gap S]`
+and `--silence-gap S` (not a speaker rule: nudging it measures the noise floor, below). The same
+tracker flags work on `--transcribe`. No stored preference and no enrolled voice is used. Six
+meetings take about six minutes unpaced on an M4.
 
-Unpaced runs give the same lines as `--realtime` (the tracker counts samples, never the wall
-clock): checked byte for byte on ES2004a.
+**Determinism.** Unpaced runs give the same lines as `--realtime` (the tracker counts samples,
+never the wall clock): checked byte for byte on ES2004a. Two runs of one configuration give
+identical lines, *but only one run at a time*: two evaluations in parallel share the Neural
+Engine and the numbers come out slightly different (one meeting's accuracy moved from 91% to
+63%). Run configurations one after another.
+
+**Noise floor.** A speaker rule that cuts a line elsewhere also moves when the speech model is
+reset, and the far-field transcript then shifts a little; that alone moves the scores. Nudging
+`--silence-gap` from 1.2 s to 1.15 / 1.25 s moved the split rate between 10.4 and 12.3 per 100
+turns and interjection recall by five points, so differences under ~15% are not evidence.
 
 ## What the columns mean
 
