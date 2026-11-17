@@ -85,6 +85,10 @@ final class RecordingBar: NSObject {
 
     func setVisible(_ visible: Bool) {
         guard visible != wantVisible else { return }
+        // Every session starts as the full bar; the pill is where it goes when minimised. A pill
+        // remembered from the last call would otherwise just appear, small, with no captions.
+        // (Not visible yet, so `apply(mode:)` only records the shape.)
+        if visible, model.barMode != .full { model.barMode = .full }
         wantVisible = visible
         feed.setActive(visible && mode == .full)
         visible ? show(mode, slide: true) : hide(mode, slide: true)
@@ -253,10 +257,18 @@ final class RecordingBar: NSObject {
     private func anchor(for m: Mode) -> NSPoint {
         if let key = Self.anchorKeys[m], let a = Prefs.store.array(forKey: key) as? [Double], a.count == 2 {
             let pt = NSPoint(x: a[0], y: a[1])
-            let dx: CGFloat = m == .full ? 40 : 0
-            if NSScreen.screens.contains(where: { $0.visibleFrame.insetBy(dx: dx, dy: -1).contains(pt) }) { return pt }
+            if Self.accepts(pt, mode: m, screens: NSScreen.screens.map(\.frame)) { return pt }
         }
         return Self.defaultAnchor()
+    }
+
+    /// Is a dragged spot still usable? Judged against whole screens, not their `visibleFrame`:
+    /// a pill parked low, beside or over the Dock's strip, is exactly where people put it, and
+    /// rejecting it sent the pill back to bottom-centre on every session. The pill only needs
+    /// its middle on a screen (it may hug an edge); the bar keeps 40 pt of itself on.
+    static func accepts(_ anchor: NSPoint, mode m: Mode, screens: [NSRect]) -> Bool {
+        let dx: CGFloat = m == .full ? 40 : 0
+        return screens.contains { $0.insetBy(dx: dx, dy: -1).contains(anchor) }
     }
 
     private static func defaultAnchor() -> NSPoint {

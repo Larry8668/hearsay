@@ -9,8 +9,8 @@
 # grants survive updates) but is not notarised, so Gatekeeper would refuse the quarantined
 # download. The postflight below removes the quarantine attribute (Homebrew 7 dropped --no-quarantine).
 cask "hearsay" do
-  version "0.4.0"
-  sha256 "fb6daa76c612dba88aa9307690d0ad4e4bf4b0c9f88ca6846d7a6a5a7195d31d"
+  version "0.4.1"
+  sha256 "f91d382636bb0d869e991ef21f96c1d56932ebac0b1833d0051807d90fdb655b"
 
   url "https://github.com/Larry8668/hearsay/releases/download/v#{version}/hearsay-#{version}.zip"
   name "hearsay"

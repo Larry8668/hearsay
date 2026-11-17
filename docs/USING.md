@@ -202,8 +202,9 @@ full bar.
 
 Drag it anywhere, including right up against the screen's left or right edge; hearsay remembers
 its spot separately from the bar's, so you can keep the bar at the bottom and the pill in a
-corner. Double-click its background to put it back at the bottom centre. It has no captions and
-no clock: the live transcript window has everything.
+corner (low next to the Dock is fine). Double-click its background to put it back at the bottom
+centre. It has no captions and no clock: the live transcript window has everything. Every session
+starts as the full bar; shrink it when you want the pill, and it goes to where you last left it.
 
 ## Pausing
 
