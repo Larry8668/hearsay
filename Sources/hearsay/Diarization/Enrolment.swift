@@ -50,6 +50,23 @@ enum Enrolment {
         (try? FileManager.default.attributesOfItem(atPath: clipURL.path))?[.modificationDate] as? Date
     }
 
+    /// Settings ▸ Tell speakers apart ▸ "I'm in this session" (default on). Off when the user
+    /// is not in the room this time: the enrolled clip would otherwise hold one of the model's
+    /// four slots for a voice that never speaks, and a fourth colleague would be merged into
+    /// someone else's. Read when a session starts, so a change applies from the next one.
+    static let activeKey = "enrolmentActive"
+    static func isActive(in defaults: UserDefaults) -> Bool { defaults.object(forKey: activeKey) as? Bool ?? true }
+    static var isActive: Bool {
+        get { isActive(in: Prefs.store) }
+        set { Prefs.store.set(newValue, forKey: activeKey) }
+    }
+
+    /// The clip to play into a new session's microphone diarizer: none while the user has said
+    /// they are not in the session (`load` is then not even read), else the stored one if any.
+    static func sessionClip(active: Bool = isActive, load: () -> [Float]? = load) -> [Float]? {
+        active ? load() : nil
+    }
+
     static func load() -> [Float]? {
         guard exists, case .success(let samples) = WAV.read(clipURL.path), !samples.isEmpty else { return nil }
         return samples

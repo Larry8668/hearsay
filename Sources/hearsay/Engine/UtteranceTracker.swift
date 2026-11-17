@@ -108,6 +108,18 @@ struct UtteranceTracker {
         /// A new speaker must hold the floor this long (their own frames) before a line is cut on
         /// the change; shorter runs are overlap, a "yes" in the background, or diarizer flicker.
         var speakerHold: TimeInterval = 0.6
+        /// Experiment (`--cut-at-pause`, off): move a speaker-change cut to the nearest pause of
+        /// `cutPause` within `cutPauseWindow` of the diarizer's boundary (see `pauseNear`).
+        var cutAtPause = false
+        var cutPause: TimeInterval = 0.25
+        var cutPauseWindow: TimeInterval = 1.0
+        /// How far before a word's first token the diarizer frames that decide who said it begin
+        /// (`--word-lead`): the RNN-T emits a token near the end of its sound.
+        var wordLead: TimeInterval = 0.25
+        /// Experiment (`--smooth-aba`, off): relabel short A-B-A lines (`SpeakerSmoothing`). Only
+        /// `--eval-speakers` applies it, to the finished lines; the live engine never does (it
+        /// failed the measurement, docs/PERFORMANCE.md, and would delay short lines by seconds).
+        var smoothABA: SpeakerSmoothing.Rule?
     }
 
     enum Reason: String {
@@ -349,29 +361,54 @@ struct UtteranceTracker {
     /// was transcribed. Nil while the first speaker's last word may still change: its full stop
     /// arrives a second or more after the word, once the model has heard the pause.
     func speakerCut() -> (end: Int, next: Int, at: Int)? {
-        guard let at = speakerTurn() else { return nil }
+        guard let turnAt = speakerTurn() else { return nil }
         let rate = AudioChunk.sampleRate
         let toks = LineSplitter.tokens(hyp, from: committedOffset)
-        guard !toks.isEmpty, let new = dominantSpeaker(from: at, to: samplesFed) else { return nil }
+        guard !toks.isEmpty, let new = dominantSpeaker(from: turnAt, to: samplesFed) else { return nil }
         let latency = Int(config.modelLatency * rate)
         var before = 0
         while before < toks.count {
             let who: Int?
             if let w = spoken(tokenFrom: toks[before].start, to: toks[before].end) {
                 // The emission sits at the word's end: whoever was heard just before it said it.
-                who = dominantSpeaker(from: w.start - Int(0.25 * rate), to: w.end)
-                    ?? dominantSpeaker(from: w.start - Int(0.6 * rate), to: w.end) ?? (w.start <= at ? -1 : new)
+                who = dominantSpeaker(from: w.start - Int(config.wordLead * rate), to: w.end)
+                    ?? dominantSpeaker(from: w.start - Int(0.6 * rate), to: w.end) ?? (w.start <= turnAt ? -1 : new)
             } else {
                 let seen = ages.firstSeen(toks[before].end - 1, fallback: samplesFed)
-                who = speakerHeard(before: seen) ?? (seen - latency / 2 <= at ? -1 : new)
+                who = speakerHeard(before: seen) ?? (seen - latency / 2 <= turnAt ? -1 : new)
             }
             if who == new { break }
             before += 1
         }
+        // The line still ends at the diarizer's boundary: moving the time as well would start the
+        // next line inside the previous voice's frames, and they would read as a turn of their own.
+        if config.cutAtPause, before > 0, before < toks.count, let p = pauseNear(toks, before) { before = p }
+        let at = turnAt
         if before == 0 { return (committedOffset, committedOffset, at) }
         guard ages.firstSeen(toks[before - 1].end - 1, fallback: samplesFed) <= samplesFed - Int(config.stableFor * rate) else { return nil }
         if before == toks.count { return (hyp.count, hyp.count, at) }
         return (toks[before - 1].end, toks[before].start, at)
+    }
+
+    /// `cutAtPause`: the word boundary to cut at instead of the one before `toks[index]` (the
+    /// first word heard from the newcomer), as the index of the first word after it. People hand over in
+    /// pauses, while the diarizer's boundary is a frame guess and the words either side of it are
+    /// placed by timings a frame or two off; so the nearest pause of `cutPause` or more within
+    /// `cutPauseWindow` of the boundary wins. Nil without word timings or such a pause.
+    private func pauseNear(_ toks: [LineSplitter.Token], _ index: Int) -> Int? {
+        let rate = AudioChunk.sampleRate
+        guard let first = spoken(tokenFrom: toks[index].start, to: toks[index].end) else { return nil }
+        let window = Int(config.cutPauseWindow * rate), minGap = Int(config.cutPause * rate)
+        var best: (index: Int, distance: Int)?
+        for k in 1..<toks.count {
+            guard let a = spoken(tokenFrom: toks[k - 1].start, to: toks[k - 1].end),
+                  let b = spoken(tokenFrom: toks[k].start, to: toks[k].end) else { continue }
+            if b.start > first.start + window { break }
+            guard b.start - a.end >= minGap, abs(b.start - first.start) <= window else { continue }
+            let d = abs(b.start - first.start)
+            if best.map({ d < $0.distance }) ?? true { best = (k, d) }
+        }
+        return best?.index
     }
 
     mutating func update(transcript: String) {

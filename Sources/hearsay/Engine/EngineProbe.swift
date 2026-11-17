@@ -15,8 +15,10 @@ enum EngineProbe {
     static func run(arguments: [String]) -> Int32 {
         var files: [String] = [], variant: StreamingModelVariant?, realtime = false, passes = 1, split = true
         var diarizer: DiarizerKind?, enrol: String?
+        var cfg = UtteranceTracker.Config()
         var it = arguments.makeIterator()
         while let a = it.next() {
+            if TrackerFlags.apply(a, &it, to: &cfg) { continue }
             switch a {
             case "--realtime": realtime = true
             case "--no-split": split = false
@@ -39,7 +41,7 @@ enum EngineProbe {
             }
         }
         guard !files.isEmpty else {
-            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N] [--no-split] [--diarize [KIND]] [--enrol me.wav]")
+            print("usage: hearsay --transcribe file.wav [--variant NAME] [--realtime] [--two other.wav] [--passes N] [--no-split] [--diarize [KIND]] [--enrol me.wav] \(TrackerFlags.usage)")
             return 2
         }
         var clip: [Float]?
@@ -80,7 +82,7 @@ enum EngineProbe {
                 }
             }
             code.value = await session(audio: audio, variant: variant ?? ParakeetEngine.configuredVariant(),
-                                       realtime: realtime, passes: passes, split: split)
+                                       realtime: realtime, passes: passes, split: split, tracker: cfg)
             sem.signal()
         }
         sem.wait()
@@ -90,8 +92,8 @@ enum EngineProbe {
     private final class Box: @unchecked Sendable { var value: Int32 = 0 }
 
     private static func session(audio: [[Float]], variant: StreamingModelVariant, realtime: Bool, passes: Int,
-                                split: Bool) async -> Int32 {
-        var cfg = UtteranceTracker.Config()
+                                split: Bool, tracker: UtteranceTracker.Config) async -> Int32 {
+        var cfg = tracker
         if !split { cfg.sentenceAfter = .infinity; cfg.clauseAfter = .infinity; cfg.clauseWords = .max; cfg.maxUtterance = .infinity }
         let engines = audio.indices.map { _ in ParakeetEngine(variant: variant, tracker: cfg) }
         print("variant: \(variant.rawValue) (\(variant.displayName))  models: \(ModelStore.directory(for: variant).path)")

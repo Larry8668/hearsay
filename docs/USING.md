@@ -70,7 +70,10 @@ to the speech model and tells voices apart as they talk:
 
 - A line ends when the speaker changes, so each line is one person. A new voice has to hold the
   floor for a moment (about half a second) before a line is cut: a "yes" in the background or two
-  people briefly talking over each other does not break the line.
+  people briefly talking over each other does not break the line. Around one microphone a
+  sentence's first or last word can still land on the neighbouring speaker's line; waiting
+  longer, cutting at pauses and smoothing short lines were all measured on real meeting audio
+  and made things worse overall (PERFORMANCE.md, *Sentences split between two speakers*).
 - The chip says who: while only one voice has been heard on the microphone it just says **me**; the
   moment a second person speaks, the first becomes **Speaker 1** and the newcomer **Speaker 2**, in
   the order they first spoke. On a call it reads **them · Zoom · Speaker 2**. Each speaker gets its
@@ -98,6 +101,13 @@ it hearing you). If it heard too little it says so and offers *Try again*. From 
 **Speaker 1, 2…**. The clip stays on this Mac (`~/Library/Application Support/hearsay/voice/me.wav`);
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
+
+Not in the room this time (recording a meeting you are only listening to)? Untick **Settings ▸ Tell
+speakers apart ▸ I'm in this session** (shown once your voice is learned; on by default). Your clip
+is then not played into the microphone's speaker model, so the slot it would hold is free for
+someone else: with Sortformer's four slots, that is the difference between four colleagues each
+getting their own label and two of them sharing one. It applies from the next session (the clip is
+played in when a session starts) and stays off until you tick it again; the clip itself is kept.
 
 Pick the speaker model under **Settings ▸ Tell speakers apart ▸ Model**:
 
@@ -260,7 +270,7 @@ _Tags: design, q4 · Apps heard: Zoom · Engine: parakeet-unified-640ms · Made 
 | Copy transcript | The current or last session as plain text |
 | Export transcript ▸ | The current or last session as Markdown, JSON, plain text or subtitles (.srt), through a save panel; or **Copy as Markdown** (handy to paste into an AI chat as context) / **Copy as JSON**. Hidden speakers are left out |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*, *I'm in this session*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, export diagnostics (a zip of the logs plus a system report, never your transcripts) to attach to a bug report, turn on verbose logging (also logs spoken text; off by default), jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now*; also *Release notes*, *Check for updates now* and *About hearsay* |
 
