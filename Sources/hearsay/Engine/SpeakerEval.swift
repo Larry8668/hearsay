@@ -32,7 +32,7 @@ enum SpeakerEval {
             }
         }
         guard let dir, let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
-            print("usage: hearsay --eval-speakers DIR [--diarize KIND] [--realtime] [--only NAME] [--dump DIR] \(TrackerFlags.usage)")
+            print("usage: hearsay --eval-speakers DIR [--diarize KIND] [--realtime] [--only NAME] [--dump DIR] [--rescore DIR] \(TrackerFlags.usage)")
             return 2
         }
         let meetings = names.filter { $0.hasSuffix(".wav") }.map { String($0.dropLast(4)) }.sorted()
