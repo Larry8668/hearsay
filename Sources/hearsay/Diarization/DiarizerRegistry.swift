@@ -52,7 +52,8 @@ actor DiarizerRegistry {
     private var instances: [String: FluidDiarizer] = [:]
     /// Stream key → speaker id of the enrolled voice.
     private var enrolled: [String: String] = [:]
-    /// Enrolment clip for this session (read once per session; nil = none).
+    /// Enrolment clip for this session (read once per session; nil = none, or the user said
+    /// they are not in it: `Enrolment.isActive`).
     private var clip: [Float]?
     private var clipLoaded = false
     /// CLI / tests (`configure`): used instead of the stored clip, nil meaning none at all.
@@ -162,7 +163,7 @@ actor DiarizerRegistry {
 
     private func enrolmentClip() -> [Float]? {
         if configured { return overrideClip }
-        if !clipLoaded { clip = Enrolment.load(); clipLoaded = true }
+        if !clipLoaded { clip = Enrolment.sessionClip(); clipLoaded = true }
         return clip
     }
 }

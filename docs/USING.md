@@ -99,6 +99,13 @@ it hearing you). If it heard too little it says so and offers *Try again*. From 
 *Forget my voice* removes it. Enrolment is a hint to the model, not a voiceprint: if two voices are
 very alike it may still mix them up.
 
+Not in the room this time (recording a meeting you are only listening to)? Untick **Settings ▸ Tell
+speakers apart ▸ I'm in this session** (shown once your voice is learned; on by default). Your clip
+is then not played into the microphone's speaker model, so the slot it would hold is free for
+someone else: with Sortformer's four slots, that is the difference between four colleagues each
+getting their own label and two of them sharing one. It applies from the next session (the clip is
+played in when a session starts) and stays off until you tick it again; the clip itself is kept.
+
 Pick the speaker model under **Settings ▸ Tell speakers apart ▸ Model**:
 
 - **Steady, up to 4 speakers** (NVIDIA Streaming Sortformer, 234 MB), the default. Identities stay
@@ -260,7 +267,7 @@ _Tags: design, q4 · Apps heard: Zoom · Engine: parakeet-unified-640ms · Made 
 | Copy transcript | The current or last session as plain text |
 | Export transcript ▸ | The current or last session as Markdown, JSON, plain text or subtitles (.srt), through a save panel; or **Copy as Markdown** (handy to paste into an AI chat as context) / **Copy as JSON**. Hidden speakers are left out |
 | Sources ▸ | Turn **Me** or **Them** off, e.g. to transcribe only a webinar. Works mid-session |
-| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
+| Settings ▸ | Launch at login, daily update check, the recording bar (on / off, full bar or pill), echo cancellation (Auto / Always / Off), tell speakers apart (Off / Microphone only / All sources, *Learn my voice…*, *I'm in this session*), the transcript text size, **Your name…** (what "me" is called everywhere; see below), which speech engine is in use, and the welcome window again |
 | Troubleshooting ▸ | Open the log file, export diagnostics (a zip of the logs plus a system report, never your transcripts) to attach to a bug report, turn on verbose logging (also logs spoken text; off by default), jump to the Microphone / System Audio privacy settings, relaunch hearsay |
 | Version line | Shows when an update is available, with *Update now*; also *Release notes*, *Check for updates now* and *About hearsay* |
 

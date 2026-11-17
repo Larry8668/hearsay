@@ -30,6 +30,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var setDiarizer: (String) -> Void = { _ in }
         var learnVoice: () -> Void
         var forgetVoice: () -> Void
+        /// Settings ▸ Tell speakers apart ▸ I'm in this session. Defaulted so the delegate wires it up when it can.
+        var toggleEnrolmentActive: () -> Void = {}
         var showWelcome: () -> Void
         var showModels: () -> Void = {}
         var openLogs: () -> Void
@@ -64,6 +66,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
         var diarization = "microphone"
         var diarizer = DiarizerKind.default.rawValue
         var voiceEnrolled = false
+        /// The enrolled voice is played into the next session (`Enrolment.isActive`).
+        var enrolmentActive = true
         var engine = ""
         /// Settings ▸ Your name, shown in the item's title.
         var yourName: String?
@@ -100,6 +104,8 @@ final class MenuBar: NSObject, NSMenuDelegate {
     private let diarizerNote = NSMenuItem()
     private let learnVoiceItem = NSMenuItem()
     private let forgetVoiceItem = NSMenuItem()
+    private let inSessionItem = NSMenuItem()
+    private let inSessionNote = NSMenuItem()
     private let engineItem = NSMenuItem()
     private let versionItem = NSMenuItem()
     private let verboseItem = NSMenuItem()
@@ -261,6 +267,12 @@ final class MenuBar: NSObject, NSMenuDelegate {
         forgetVoiceItem.title = "Forget my voice"
         bind(forgetVoiceItem, #selector(forgetVoice))
         diarization.addItem(forgetVoiceItem)
+        inSessionItem.title = "I'm in this session"
+        inSessionItem.toolTip = "Off: your learned voice is not used, so its speaker slot is free for someone else"
+        bind(inSessionItem, #selector(toggleEnrolmentActive))
+        diarization.addItem(inSessionItem)
+        inSessionNote.isEnabled = false
+        diarization.addItem(inSessionNote)
         diarizationItem.submenu = diarization
         settings.addItem(diarizationItem)
         fontItem.title = "Transcript text size"
@@ -384,6 +396,12 @@ final class MenuBar: NSObject, NSMenuDelegate {
         learnVoiceItem.title = s.voiceEnrolled ? "Learn my voice again…" : "Learn my voice…"
         learnVoiceItem.isEnabled = !s.listening
         forgetVoiceItem.isHidden = !s.voiceEnrolled
+        inSessionItem.isHidden = !s.voiceEnrolled
+        inSessionItem.state = s.enrolmentActive ? .on : .off
+        inSessionNote.isHidden = !s.voiceEnrolled
+        // The clip is played into the diarizer when a session starts, so a change waits for the next one.
+        inSessionNote.title = s.enrolmentActive ? "Off frees your voice's slot for others; from the next session"
+            : "Your voice is not used; from the next session"
         engineItem.title = "Engine: \(s.engine.isEmpty ? "—" : s.engine)"
         yourNameItem.title = s.yourName.map { "Your name: \($0)…" } ?? "Your name…"
     }
@@ -442,6 +460,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     @objc private func chooseDiarizer(_ sender: NSMenuItem) { actions.setDiarizer(sender.identifier?.rawValue ?? DiarizerKind.default.rawValue) }
     @objc private func learnVoice() { actions.learnVoice() }
     @objc private func forgetVoice() { actions.forgetVoice() }
+    @objc private func toggleEnrolmentActive() { actions.toggleEnrolmentActive() }
     @objc private func openMicSettings() { actions.openSettings(.me) }
     @objc private func openTapSettings() { actions.openSettings(.them) }
     @objc private func relaunch() { actions.relaunch() }

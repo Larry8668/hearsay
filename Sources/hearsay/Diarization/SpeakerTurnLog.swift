@@ -64,6 +64,9 @@ final class SpeakerTurnLog: @unchecked Sendable {
         emit("\(stream): tentative #\(tentative + 1) at \(Self.secs(at.timeIntervalSince(origin))) settled as #\(settled + 1)")
     }
 
+    /// Turns and revisions counted so far, logged or not (`hearsay --eval-speakers`).
+    var counts: (turns: Int, revisions: Int) { stats.withLock { ($0.turns, $0.revisions) } }
+
     /// The end-of-session line; nil when no speaker ever settled on this stream.
     func summary() -> String? {
         let s = stats.withLock { $0 }

@@ -459,3 +459,24 @@ final class SpeakerTranscriptTests: XCTestCase {
         XCTAssertEqual(side.roster.displayName("me#1"), "Speaker 1")
     }
 }
+
+/// Settings ▸ Tell speakers apart ▸ I'm in this session.
+final class EnrolmentActiveTests: XCTestCase {
+    func testTheClipIsPlayedOnlyWhileTheUserIsInTheSession() {
+        let clip: [Float] = [0.1, 0.2]
+        var reads = 0
+        XCTAssertEqual(Enrolment.sessionClip(active: true, load: { reads += 1; return clip }), clip)
+        XCTAssertNil(Enrolment.sessionClip(active: false, load: { reads += 1; return clip }), "off: the slot stays free")
+        XCTAssertEqual(reads, 1, "an inactive enrolment does not even read the clip")
+        XCTAssertNil(Enrolment.sessionClip(active: true, load: { nil }), "on but never learned: nothing to play")
+    }
+
+    func testInTheSessionIsOnUnlessTurnedOff() {
+        let d = UserDefaults(suiteName: "hearsay.tests.enrolment")!
+        d.removePersistentDomain(forName: "hearsay.tests.enrolment")
+        XCTAssertTrue(Enrolment.isActive(in: d), "default on")
+        d.set(false, forKey: Enrolment.activeKey)
+        XCTAssertFalse(Enrolment.isActive(in: d))
+        d.removePersistentDomain(forName: "hearsay.tests.enrolment")
+    }
+}

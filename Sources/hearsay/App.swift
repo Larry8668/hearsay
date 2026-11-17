@@ -13,6 +13,7 @@ enum Main {
         //   open -W -n --stdout out.txt build/hearsay.app --args --audio-probe system
         if args.first == "--audio-probe" { exit(AudioProbe.run(arguments: Array(args.dropFirst()))) }
         if args.first == "--transcribe" { exit(EngineProbe.run(arguments: Array(args.dropFirst()))) }
+        if args.first == "--eval-speakers" { exit(SpeakerEval.run(arguments: Array(args.dropFirst()))) }
         Log.start(role: DevMode.isDev ? "app (dev)" : "app")
 
         // SIGTERM/SIGINT (pkill, the Homebrew update script, logout, Ctrl-C) → a normal quit, so the
@@ -285,6 +286,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             learnVoice: { [weak self] in self?.learnVoice() },
             forgetVoice: { [weak self] in Enrolment.forget(); self?.refresh() },
+            toggleEnrolmentActive: { [weak self] in
+                Enrolment.isActive.toggle()
+                Log.info("enrolment: \(Enrolment.isActive ? "in" : "not in") the next session")
+                self?.refresh()
+            },
             showWelcome: { [weak self] in self?.welcome.show() },
             showModels: { [weak self] in self?.models.show() },
             openLogs: { NSWorkspace.shared.open(Log.fileURL) },
@@ -342,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.diarization = model.diarization.rawValue
         s.diarizer = DiarizerKind.current.rawValue
         s.voiceEnrolled = Enrolment.exists
+        s.enrolmentActive = Enrolment.isActive
         s.engine = model.engineID
         s.yourName = model.yourName
         menuBar.update(s)
